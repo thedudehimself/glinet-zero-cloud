@@ -58,7 +58,10 @@ for dev in cfg.get("devices", []):
     local_port = int(dev["proxy_local_port"])
     ts_port = int(dev["tailscale_port"])
     is_https = scheme == "https"
-    host_hdr = "$http_host"
+    # GL.iNet 4.11.1+ oui-access.lua rejects external *.ts.net Host headers with 403; use router LAN Host for van_router
+    host_hdr = dev.get("upstream_host_header", "192.168.8.1" if dev.get("role") == "van_router" else "$http_host")
+    if not re.fullmatch(r"[A-Za-z0-9.:$_-]+", host_hdr):
+        raise SystemExit(f"Invalid upstream_host_header for {dev_id}: {host_hdr!r}")
     ssl_lines = "            proxy_ssl_verify off;\n            proxy_ssl_server_name off;\n" if is_https else ""
     timeout_s = "3600s" if dev.get("role") == "kvm" else "300s"
     max_body = "0" if dev.get("role") == "kvm" else "64m"
@@ -108,6 +111,7 @@ echo "[3/5] Syncing files to ${GATEWAY_HOST}:${REMOTE_DIR}..."
 ssh "${GATEWAY_HOST}" "mkdir -p '${REMOTE_DIR}/src/static' /run/glinet-portal/tmp"
 scp -q "${ROOT_DIR}"/src/*.py "${GATEWAY_HOST}:${REMOTE_DIR}/src/"
 scp -q "${ROOT_DIR}/src/static/index.html" "${GATEWAY_HOST}:${REMOTE_DIR}/src/static/"
+scp -q "${ROOT_DIR}/router/www/van/index.html" "${GATEWAY_HOST}:${REMOTE_DIR}/src/static/van.html"
 scp -q "${CONFIG_PATH}" "${GATEWAY_HOST}:${REMOTE_DIR}/devices.json"
 scp -q "${TMP_DIR}/nginx.conf" "${GATEWAY_HOST}:${REMOTE_DIR}/nginx.conf"
 scp -q "${TMP_DIR}/glinet-portal.service" "${TMP_DIR}/glinet-portal-nginx.service" "${GATEWAY_HOST}:/etc/systemd/system/"

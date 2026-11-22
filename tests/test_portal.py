@@ -549,6 +549,102 @@ def test_van_hunter_and_networks_endpoints_enforce_409_lock_role_and_redaction(t
     assert 'data-action="hunt-scan"' in html
     assert 'data-action="open-networks"' in html
     assert "VPN ENCRYPTED" in html
+    assert 'href="/van/"' in html
+
+
+def test_van_ui_and_cgi_bridge_routes_require_tailscale_auth_and_csrf(tmp_path: Path):
+    cfg = json.loads(json.dumps(CFG))
+    cfg["devices"].append(
+        {
+            "id": "mt3000",
+            "name": "GL-MT3000 (Mobile Router)",
+            "role": "van_router",
+            "model": "GL-MT3000",
+            "mac": "02:00:5e:00:53:03",
+            "fallback_ip": "10.10.20.50",
+            "wg_ip": "192.168.2.5",
+            "wg_iface": "wg0",
+            "preferred_vlan": "vlan20",
+            "scheme": "http",
+            "upstream_port": 80,
+            "proxy_local_port": 8455,
+            "tailscale_port": 8445,
+            "ssh_enabled": True,
+            "ssh_user": "root",
+        }
+    )
+
+    app = PortalApp(
+        cfg,
+        StateStore(tmp_path / "s.db"),
+        enable_system_io=False,
+        van_status_fn=lambda *a: {"ok": True, "mode": "auto", "active_wan": "cpe", "vpn": {"state": "killswitch_locked"}},
+        list_networks_fn=lambda *a: {"ok": True, "auto_hunt": True, "networks": [], "blocklist": []},
+        wan_mode_fn=lambda ip, user, key, mode: {"ok": True, "mode": mode, "result": {"ok": True}, "error": None},
+        van_reset_usage_fn=lambda *a: {"ok": True, "reset": True},
+    )
+    srv = create_server(app, "127.0.0.1", 0)
+    port = srv.server_address[1]
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    try:
+        for p in ("/van/", "/cgi-bin/van-wan"):
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}{p}")
+                assert False, f"Expected 403 for unauthenticated {p}"
+            except urllib.error.HTTPError as e:
+                assert e.code == 403
+
+        auth_hdrs = {"Tailscale-User-Login": "alice@example.com"}
+        with urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{port}/van/", headers=auth_hdrs)) as resp:
+            assert resp.status == 200
+            assert "no-store" in resp.headers.get("Cache-Control", "")
+            assert b"cgi-bin/van-wan" in resp.read()
+
+        with urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{port}/cgi-bin/van-wan", headers=auth_hdrs)) as resp:
+            assert resp.status == 200
+            assert json.loads(resp.read().decode())["mode"] == "auto"
+
+        with urllib.request.urlopen(
+            urllib.request.Request(f"http://127.0.0.1:{port}/cgi-bin/van-wan?resource=networks", headers=auth_hdrs)
+        ) as resp:
+            assert resp.status == 200
+            assert json.loads(resp.read().decode())["auto_hunt"] is True
+
+        bad_post = urllib.request.Request(
+            f"http://127.0.0.1:{port}/cgi-bin/van-wan",
+            method="POST",
+            headers={
+                "Tailscale-User-Login": "alice@example.com",
+                "Origin": "https://gateway.tailnet-example.ts.net:8440",
+                "Content-Type": "application/json",
+            },
+            data=json.dumps({"mode": "auto"}).encode(),
+        )
+        try:
+            urllib.request.urlopen(bad_post)
+            assert False, "Expected 403 without X-Van-Action"
+        except urllib.error.HTTPError as e:
+            assert e.code == 403
+
+        ok_hdrs = {
+            "Tailscale-User-Login": "alice@example.com",
+            "X-Van-Action": "1",
+            "Origin": "https://gateway.tailnet-example.ts.net:8440",
+            "Content-Type": "application/json",
+        }
+        ok_post = urllib.request.Request(
+            f"http://127.0.0.1:{port}/cgi-bin/van-wan",
+            method="POST",
+            headers=ok_hdrs,
+            data=json.dumps({"action": "reset-usage"}).encode(),
+        )
+        with urllib.request.urlopen(ok_post) as resp:
+            assert resp.status == 200
+            assert json.loads(resp.read().decode())["reset"] is True
+    finally:
+        srv.shutdown()
+        srv.server_close()
 
 
 

@@ -25,11 +25,13 @@ from ssh_ops import (
     check_tcp_reachable,
     disable_kvm_cloud,
     disable_van_cloud,
+    get_van_status,
     list_van_networks,
     mutate_van_networks,
     probe_kvm,
     probe_van_router,
     reboot_kvm,
+    reset_van_usage,
     run_triage_sweep,
     run_van_hunt_connect,
     run_van_hunt_scan,
@@ -96,6 +98,8 @@ class PortalApp:
         hunt_config_fn: Callable | None = None,
         list_networks_fn: Callable | None = None,
         mutate_networks_fn: Callable | None = None,
+        van_status_fn: Callable | None = None,
+        van_reset_usage_fn: Callable | None = None,
     ) -> None:
         self.config = config
         self.store = store
@@ -125,6 +129,8 @@ class PortalApp:
         self._hunt_config_fn = hunt_config_fn or set_van_hunt_config
         self._list_networks_fn = list_networks_fn or list_van_networks
         self._mutate_networks_fn = mutate_networks_fn or mutate_van_networks
+        self._van_status_fn = van_status_fn or get_van_status
+        self._van_reset_usage_fn = van_reset_usage_fn or reset_van_usage
 
         self._state_lock = threading.Lock()
         self._fast_lock = threading.Lock()
@@ -176,7 +182,10 @@ class PortalApp:
             return False, 403, "Tailscale authentication required"
 
         if method == "POST":
-            if _hdr_get(headers, "X-Portal-Action") != "1":
+            if clean_path == "/cgi-bin/van-wan":
+                if _hdr_get(headers, "X-Van-Action") != "1" and _hdr_get(headers, "X-Portal-Action") != "1":
+                    return False, 403, "Missing X-Van-Action header"
+            elif _hdr_get(headers, "X-Portal-Action") != "1":
                 return False, 403, "Missing X-Portal-Action header"
             origin = _hdr_get(headers, "Origin")
             if not origin:
@@ -474,6 +483,57 @@ class PortalApp:
             return 200, res
         return (400 if res.get("exit_code") == 2 else 502), {"ok": False, "error": res.get("error") or "Network update failed"}
 
+    def default_van_device_id(self) -> str | None:
+        for dev in self.devices:
+            if dev.get("role") == "van_router":
+                return dev["id"]
+        return None
+
+    def get_van_status_live(self, device_id: str) -> tuple[int, dict]:
+        dev = self.devices_by_id.get(device_id)
+        if not dev or dev.get("role") != "van_router":
+            return 404, {"error": "Van router not configured"}
+        ip = self._device_ip(device_id, dev)
+        res = self._van_status_fn(ip, dev.get("ssh_user", "root"), self.ssh_key)
+        if res.get("ok"):
+            return 200, res
+        return 502, {"ok": False, "error": res.get("error") or "Failed to fetch van-wan status"}
+
+    def trigger_van_reset_usage(self, device_id: str) -> tuple[int, dict]:
+        dev = self.devices_by_id.get(device_id)
+        if not dev or dev.get("role") != "van_router":
+            return 404, {"error": "Van router not configured"}
+        ip = self._device_ip(device_id, dev)
+        res = self._van_reset_usage_fn(ip, dev.get("ssh_user", "root"), self.ssh_key)
+        if res.get("ok"):
+            return 200, res
+        return 502, {"ok": False, "error": res.get("error") or "Failed to reset usage"}
+
+    def handle_van_cgi_post(self, device_id: str, body_json: dict) -> tuple[int, dict]:
+        action = body_json.get("action")
+        if isinstance(action, str) and action:
+            if action == "reset-usage":
+                return self.trigger_van_reset_usage(device_id)
+            if action == "hunt-scan":
+                return self.trigger_hunt_scan(device_id)
+            if action == "hunt-connect":
+                ssid = body_json.get("ssid")
+                bssid = body_json.get("bssid", "")
+                if not isinstance(ssid, str) or (bssid is not None and not isinstance(bssid, str)):
+                    return 400, {"error": "Invalid ssid/bssid fields"}
+                return self.trigger_hunt_connect(device_id, ssid, bssid or "")
+            if action == "hunt-config":
+                return self.trigger_hunt_config(device_id, body_json)
+            if action in ("networks-upsert", "networks-delete", "networks-block", "networks-unblock"):
+                sub = dict(body_json)
+                sub["action"] = action.split("-", 1)[1]
+                return self.trigger_van_networks(device_id, sub)
+            return 400, {"error": f"Unknown action: {action!r}"}
+        mode = body_json.get("mode")
+        if isinstance(mode, str) and mode:
+            return self.trigger_wan_mode(device_id, mode)
+        return 400, {"error": "Missing action or mode"}
+
     def build_devices_payload(self) -> dict:
         with self._state_lock:
             items = []
@@ -540,6 +600,10 @@ class PortalApp:
 
 def create_server(app: PortalApp, host: str = "127.0.0.1", port: int = 8450) -> ThreadingHTTPServer:
     index_path = STATIC_DIR / "index.html"
+    van_index_candidates = (
+        STATIC_DIR / "van.html",
+        Path(__file__).resolve().parent.parent / "router" / "www" / "van" / "index.html",
+    )
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -592,6 +656,31 @@ def create_server(app: PortalApp, host: str = "127.0.0.1", port: int = 8450) -> 
                     return
                 self._send_html(index_path.read_bytes(), head_only=head_only)
                 return
+            if path == "/van":
+                self.send_response(302)
+                self.send_header("Location", "/van/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            if path in ("/van/", "/van/index.html"):
+                van_path = next((p for p in van_index_candidates if p.exists()), None)
+                if not van_path:
+                    self._send_json(500, {"error": "van.html missing"}, head_only=head_only)
+                    return
+                self._send_html(van_path.read_bytes(), head_only=head_only)
+                return
+            if path == "/cgi-bin/van-wan":
+                van_id = app.default_van_device_id()
+                if not van_id:
+                    self._send_json(404, {"error": "No van_router configured"}, head_only=head_only)
+                    return
+                qs = self.path.split("?", 1)[1] if "?" in self.path else ""
+                if "resource=networks" in qs:
+                    code, data = app.get_van_networks(van_id)
+                else:
+                    code, data = app.get_van_status_live(van_id)
+                self._send_json(code, data, head_only=head_only)
+                return
             if path == "/api/devices":
                 self._send_json(200, app.build_devices_payload(), head_only=head_only)
                 return
@@ -637,6 +726,23 @@ def create_server(app: PortalApp, host: str = "127.0.0.1", port: int = 8450) -> 
                 app.refresh_fast()
                 app.refresh_ssh()
                 self._send_json(200, app.build_devices_payload())
+                return
+
+            if path == "/cgi-bin/van-wan":
+                van_id = app.default_van_device_id()
+                if not van_id:
+                    self._send_json(404, {"error": "No van_router configured"})
+                    return
+                try:
+                    body_json = json.loads(raw_body.decode("utf-8") or "{}")
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    self._send_json(400, {"error": "Invalid JSON body"})
+                    return
+                if not isinstance(body_json, dict):
+                    self._send_json(400, {"error": "JSON object required"})
+                    return
+                code, data = app.handle_van_cgi_post(van_id, body_json)
+                self._send_json(code, data)
                 return
 
             parts = [p for p in path.split("/") if p]

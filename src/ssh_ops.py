@@ -471,6 +471,14 @@ def list_van_networks(ip: str, user: str, key_path: Path, runner=subprocess.run,
     return _run_van_json_cmd(ip, user, key_path, "/usr/bin/van-wan networks list", runner=runner, timeout=timeout)
 
 
+def get_van_status(ip: str, user: str, key_path: Path, runner=subprocess.run, timeout: int = 12) -> dict:
+    return _run_van_json_cmd(ip, user, key_path, "/usr/bin/van-wan status", runner=runner, timeout=timeout)
+
+
+def reset_van_usage(ip: str, user: str, key_path: Path, runner=subprocess.run, timeout: int = 12) -> dict:
+    return _run_van_json_cmd(ip, user, key_path, "/usr/bin/van-wan reset-usage", runner=runner, timeout=timeout)
+
+
 def mutate_van_networks(
     ip: str,
     user: str,
