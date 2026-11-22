@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>GL.iNet Control Plane</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --surface: #131a22;
+      --surface-2: #1a232e;
+      --border: #263241;
+      --text: #e6edf5;
+      --muted: #8ea0b5;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --green: #22c55e;
+      --amber: #f59e0b;
+      --red: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.45;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
+    h1 {
+      font-size: 1.25rem;
+      margin: 0;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .sub {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text);
+      font-size: 0.88rem;
+      font-weight: 500;
+      text-decoration: none;
+      cursor: pointer;
+      min-height: 42px;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .btn:hover:not(:disabled) { background: #222e3d; border-color: #36475c; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+      font-weight: 600;
+      width: 100%;
+    }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+    .btn-danger { border-color: rgba(239, 68, 68, 0.45); color: #fca5a5; }
+    .btn-danger:hover:not(:disabled) { background: rgba(239, 68, 68, 0.16); }
+    .banner {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 14px;
+      margin-bottom: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .banner-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .banner.critical { border-color: rgba(239, 68, 68, 0.7); background: rgba(239, 68, 68, 0.08); }
+    .banner.warn { border-color: rgba(245, 158, 11, 0.6); background: rgba(245, 158, 11, 0.08); }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      border: 1px solid transparent;
+    }
+    .pill-green { background: rgba(34, 197, 94, 0.14); color: #86efac; border-color: rgba(34, 197, 94, 0.35); }
+    .pill-blue { background: rgba(59, 130, 246, 0.16); color: #93c5fd; border-color: rgba(59, 130, 246, 0.4); }
+    .pill-amber { background: rgba(245, 158, 11, 0.15); color: #fcd34d; border-color: rgba(245, 158, 11, 0.4); }
+    .pill-red { background: rgba(239, 68, 68, 0.16); color: #fca5a5; border-color: rgba(239, 68, 68, 0.45); }
+    .pill-muted { background: rgba(142, 160, 181, 0.12); color: var(--muted); border-color: var(--border); }
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .dot-on { background: var(--green); box-shadow: 0 0 8px rgba(34, 197, 94, 0.7); }
+    .dot-off { background: var(--red); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+      gap: 14px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .card-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .card-title {
+      font-size: 1.05rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .meta {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 4px 12px;
+      font-size: 0.84rem;
+    }
+    .meta dt { color: var(--muted); }
+    .meta dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; word-break: break-all; }
+    .badges { display: flex; flex-wrap: wrap; gap: 6px; }
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .sweep-box {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 0.8rem;
+    }
+    .van-box {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-size: 0.82rem;
+    }
+    .budget-bar {
+      height: 8px;
+      background: #080c10;
+      border-radius: 999px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .budget-fill { height: 100%; background: var(--green); }
+    .mode-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+    .btn-mode-active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .alert-list {
+      margin: 0;
+      padding-left: 18px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.78rem;
+      color: #fca5a5;
+    }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.72);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      z-index: 50;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      width: 100%;
+      max-width: 780px;
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .modal-head {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .modal pre {
+      margin: 0;
+      padding: 14px 16px;
+      overflow: auto;
+      font-size: 0.78rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #080c10;
+      color: #d1dce8;
+      flex: 1;
+    }
+    .toast {
+      position: fixed;
+      bottom: 18px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1f2937;
+      border: 1px solid #374151;
+      color: #fff;
+      padding: 10px 16px;
+      border-radius: 10px;
+      font-size: 0.85rem;
+      display: none;
+      z-index: 60;
+      max-width: 90vw;
+    }
+    .toast.show { display: block; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>GL.iNet Private Control Plane</h1>
+        <div class="sub" id="host-sub">Loading status...</div>
+      </div>
+      <button class="btn" id="refresh-btn" onclick="refreshAll(true)">Refresh Now</button>
+    </header>
+
+    <section class="banner" id="conntrack-banner">
+      <div class="banner-row">
+        <div>
+          <strong>Gateway Conntrack Guardrail</strong>
+          <span class="sub" id="conntrack-time"></span>
+        </div>
+        <span class="pill pill-muted" id="conntrack-pill">Checking...</span>
+      </div>
+      <ul class="alert-list" id="conntrack-list" style="display:none;"></ul>
+    </section>
+
+    <main class="grid" id="device-grid"></main>
+  </div>
+
+  <div class="modal-backdrop" id="log-modal" onclick="if(event.target===this)closeModal()">
+    <div class="modal">
+      <div class="modal-head">
+        <strong id="modal-title">Triage Sweep Log</strong>
+        <button class="btn" style="min-height:32px;padding:4px 10px;" onclick="closeModal()">Close</button>
+      </div>
+      <pre id="modal-body"></pre>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="wifi-modal" onclick="if(event.target===this)closeWifiModal()">
+    <div class="modal">
+      <div class="modal-head">
+        <strong id="wifi-modal-title">Mobile Router Wi-Fi Hunter</strong>
+        <button class="btn" style="min-height:32px;padding:4px 10px;" onclick="closeWifiModal()">Close</button>
+      </div>
+      <div id="wifi-modal-body" style="padding:14px 16px;overflow:auto;display:flex;flex-direction:column;gap:10px;"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    let latestData = null;
+
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"']/g, c => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[c]));
+    }
+
+    function showToast(msg) {
+      const el = document.getElementById("toast");
+      el.textContent = msg;
+      el.classList.add("show");
+      clearTimeout(el._t);
+      el._t = setTimeout(() => el.classList.remove("show"), 4000);
+    }
+
+    function openLog(deviceId) {
+      const dev = latestData?.devices?.find(d => d.id === deviceId);
+      if (!dev || !dev.last_sweep) return;
+      document.getElementById("modal-title").textContent = `${dev.name} — Sweep (${dev.last_sweep.timestamp})`;
+      document.getElementById("modal-body").textContent = dev.last_sweep.output || "(no output)";
+      document.getElementById("log-modal").classList.add("open");
+    }
+
+    function closeModal() {
+      document.getElementById("log-modal").classList.remove("open");
+    }
+
+    let wifiModalDevId = null;
+    let wifiModalDevName = null;
+    function closeWifiModal() {
+      document.getElementById("wifi-modal").classList.remove("open");
+    }
+
+    async function runHuntScan(id, name) {
+      wifiModalDevId = id;
+      wifiModalDevName = name;
+      document.getElementById("wifi-modal-title").textContent = `${name} — Nearby Wi-Fi Scan`;
+      document.getElementById("wifi-modal-body").innerHTML = `<div class="sub">Scanning via GrooveA-52 (up to 15s)...</div>`;
+      document.getElementById("wifi-modal").classList.add("open");
+      try {
+        const res = await apiPost(`/api/devices/${id}/hunt-scan`, {});
+        const cands = res.candidates || [];
+        if (cands.length === 0) {
+          document.getElementById("wifi-modal-body").innerHTML = `<div class="sub">No eligible APs above RSSI floor found.</div>`;
+          return;
+        }
+        document.getElementById("wifi-modal-body").innerHTML = cands.map(c => `
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2);">
+            <div>
+              <strong>${esc(c.ssid)}</strong>
+              <div class="sub">Tier ${esc(c.tier)} • ${esc(c.rssi_dbm)} dBm • ${esc(c.security)} • ${c.trusted ? "Trusted (Direct)" : "VPN-Gated"}${c.cooled_down ? " • COOLDOWN (" + esc(c.cooldown_reason || "blocked") + ")" : ""}</div>
+            </div>
+            <button class="btn" style="min-height:34px;padding:4px 10px;font-size:0.78rem;" data-wifi-action="connect" data-ssid="${esc(c.ssid)}" data-bssid="${esc(c.bssid || "")}">Connect</button>
+          </div>`).join("");
+      } catch (err) {
+        document.getElementById("wifi-modal-body").innerHTML = `<div class="sub" style="color:#fca5a5;">Scan failed: ${esc(err.message)}</div>`;
+      }
+    }
+
+    async function openNetworksModal(id, name) {
+      wifiModalDevId = id;
+      wifiModalDevName = name;
+      document.getElementById("wifi-modal-title").textContent = `${name} — Known Wi-Fi Allowlist`;
+      document.getElementById("wifi-modal-body").innerHTML = `<div class="sub">Loading allowlist...</div>`;
+      document.getElementById("wifi-modal").classList.add("open");
+      try {
+        const r = await fetch(`/api/devices/${id}/networks`, { cache: "no-store" });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+        const nets = d.networks || [];
+        const listHtml = nets.length === 0
+          ? `<div class="sub">No saved Wi-Fi networks yet.</div>`
+          : nets.map(n => `
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2);">
+              <div>
+                <strong>${esc(n.ssid)}</strong>
+                <div class="sub">${esc(n.security)} • ${n.has_psk ? "PSK saved (redacted)" : "No PSK"} • ${n.trusted ? "Trusted (Direct)" : "VPN-Gated"}</div>
+              </div>
+              <button class="btn btn-danger" style="min-height:32px;padding:4px 10px;font-size:0.76rem;" data-wifi-action="delete" data-ssid="${esc(n.ssid)}">Delete</button>
+            </div>`).join("");
+        document.getElementById("wifi-modal-body").innerHTML = `
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span class="sub">Auto-Hunt: <strong>${d.auto_hunt ? "ON" : "OFF"}</strong> • Xfinity: ${d.allow_xfinity ? "ON" : "OFF"} • Open Wi-Fi (VPN-Gated): ${d.allow_open_wifi ? "ON" : "OFF"}</span>
+            <button class="btn" style="min-height:32px;padding:4px 10px;font-size:0.76rem;" data-wifi-action="toggle-hunt" data-next="${d.auto_hunt ? "false" : "true"}">${d.auto_hunt ? "Disable Auto-Hunt" : "Enable Auto-Hunt"}</button>
+          </div>
+          ${listHtml}
+          <form id="portal-add-net" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px;padding-top:10px;border-top:1px solid var(--border);">
+            <input id="p-ssid" placeholder="SSID" maxlength="32" required style="padding:8px;border-radius:8px;border:1px solid var(--border);background:#080c10;color:var(--text);" />
+            <select id="p-sec" style="padding:8px;border-radius:8px;border:1px solid var(--border);background:#080c10;color:var(--text);">
+              <option value="wpa2">WPA2/WPA3 (PSK)</option>
+              <option value="open">Open (Always VPN-Gated)</option>
+            </select>
+            <input id="p-psk" type="password" placeholder="Wi-Fi Password" maxlength="64" style="padding:8px;border-radius:8px;border:1px solid var(--border);background:#080c10;color:var(--text);" />
+            <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;color:var(--muted);"><input type="checkbox" id="p-trusted" /> Trusted (Skip VPN)</label>
+            <button type="submit" class="btn btn-primary" style="grid-column:1 / -1;">Save Network (PSKs Never Displayed)</button>
+          </form>`;
+        document.getElementById("p-sec").addEventListener("change", (ev) => {
+          const isOpen = ev.target.value === "open";
+          const tr = document.getElementById("p-trusted");
+          tr.disabled = isOpen;
+          if (isOpen) tr.checked = false;
+        });
+        document.getElementById("portal-add-net").addEventListener("submit", async (ev) => {
+          ev.preventDefault();
+          try {
+            await apiPost(`/api/devices/${id}/networks`, {
+              action: "upsert",
+              ssid: document.getElementById("p-ssid").value.trim(),
+              security: document.getElementById("p-sec").value,
+              psk: document.getElementById("p-psk").value,
+              trusted: document.getElementById("p-trusted").checked,
+            });
+            showToast("Saved Wi-Fi network to GL-MT3000");
+            await openNetworksModal(id, name);
+          } catch (err) { showToast(`Save failed: ${err.message}`); }
+        });
+      } catch (err) {
+        document.getElementById("wifi-modal-body").innerHTML = `<div class="sub" style="color:#fca5a5;">Failed to load networks: ${esc(err.message)}</div>`;
+      }
+    }
+
+    async function apiPost(path, bodyObj) {
+      const opts = {
+        method: "POST",
+        headers: { "X-Portal-Action": "1" },
+      };
+      if (bodyObj !== undefined) {
+        opts.headers["Content-Type"] = "application/json";
+        opts.body = JSON.stringify(bodyObj);
+      }
+      const resp = await fetch(path, opts);
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      return data;
+    }
+
+    async function setWanMode(id, name, mode) {
+      showToast(`Setting ${name} WAN mode to ${mode}...`);
+      try {
+        await apiPost(`/api/devices/${id}/wan-mode`, { mode });
+        showToast(`${name}: WAN mode -> ${mode}`);
+        await refreshAll(false);
+      } catch (err) {
+        showToast(`WAN mode failed: ${err.message}`);
+      }
+    }
+
+    async function runSweep(id, name) {
+      showToast(`Running CSA-2026-01 triage on ${name}...`);
+      try {
+        const res = await apiPost(`/api/devices/${id}/sweep`);
+        showToast(`${name}: ${res.sweep?.verdict || res.sweep?.status}`);
+        await refreshAll(false);
+      } catch (err) {
+        showToast(`Sweep failed: ${err.message}`);
+      }
+    }
+
+    async function disableCloud(id, name) {
+      if (!confirm(`Force-disable gl-cloud and rtty on ${name}?`)) return;
+      try {
+        await apiPost(`/api/devices/${id}/disable-cloud`);
+        showToast(`Disabled cloud agents on ${name}`);
+        await refreshAll(false);
+      } catch (err) {
+        showToast(`Disable failed: ${err.message}`);
+      }
+    }
+
+    async function rebootDevice(id, name) {
+      if (!confirm(`Reboot ${name} now? Active KVM sessions will disconnect.`)) return;
+      try {
+        await apiPost(`/api/devices/${id}/reboot`);
+        showToast(`Reboot triggered for ${name}`);
+      } catch (err) {
+        showToast(`Reboot failed: ${err.message}`);
+      }
+    }
+
+    function render(data) {
+      latestData = data;
+      document.getElementById("host-sub").textContent =
+        `${data.tailscale_host} • Updated ${data.generated_at}`;
+
+      // Conntrack banner
+      const banner = document.getElementById("conntrack-banner");
+      const pill = document.getElementById("conntrack-pill");
+      const list = document.getElementById("conntrack-list");
+      const alerts = data.conntrack?.alerts || [];
+      document.getElementById("conntrack-time").textContent =
+        data.conntrack?.checked_at ? ` • Checked ${data.conntrack.checked_at}` : "";
+      banner.className = "banner";
+      if (data.conntrack && data.conntrack.available === false) {
+        pill.className = "pill pill-muted";
+        pill.textContent = "UNAVAILABLE (NON-GATEWAY HOST)";
+      } else if (alerts.some(a => a.severity === "CRITICAL")) {
+        banner.classList.add("critical");
+        pill.className = "pill pill-red";
+        pill.textContent = `CRITICAL (${alerts.length})`;
+      } else if (alerts.length > 0) {
+        banner.classList.add("warn");
+        pill.className = "pill pill-amber";
+        pill.textContent = `WARN (${alerts.length})`;
+      } else {
+        pill.className = "pill pill-green";
+        pill.textContent = "ZERO CLOUD / C2 FLOWS";
+      }
+      if (alerts.length > 0) {
+        list.style.display = "block";
+        list.innerHTML = alerts.map(a =>
+          `<li>[${esc(a.severity)}] ${esc(a.device_id)} ${esc(a.src)} -> ${esc(a.dst)}:${esc(a.dport)} (${esc(a.proto)}) — ${esc(a.reason)}</li>`
+        ).join("");
+      } else {
+        list.style.display = "none";
+        list.innerHTML = "";
+      }
+
+      // Device cards
+      const grid = document.getElementById("device-grid");
+      grid.innerHTML = (data.devices || []).map(dev => {
+        const st = dev.status || {};
+        const online = Boolean(st.online);
+        const vlanOk = dev.role !== "kvm" || st.vlan === dev.preferred_vlan;
+        const vlanPill = vlanOk
+          ? `<span class="pill pill-green">VLAN ${esc(st.vlan || dev.preferred_vlan)}</span>`
+          : `<span class="pill pill-amber">VLAN ${esc(st.vlan)} (expect ${esc(dev.preferred_vlan)})</span>`;
+
+        let cloudPill = `<span class="pill pill-muted">Cloud: N/A</span>`;
+        if (dev.ssh_enabled) {
+          if (st.cloud_off === true) {
+            cloudPill = `<span class="pill pill-green">gl-cloud / rtty: OFF</span>`;
+          } else if (st.cloud_off === false) {
+            cloudPill = `<span class="pill pill-red">CLOUD ACTIVE!</span>`;
+          } else {
+            cloudPill = `<span class="pill pill-muted">Cloud: Unverified</span>`;
+          }
+        }
+
+        const sw = dev.last_sweep;
+        let sweepHtml = `<div class="sweep-box">No triage sweep recorded yet.</div>`;
+        if (sw) {
+          const swClass = sw.status === "clean" ? "pill-green" : sw.status === "ioc" ? "pill-red" : "pill-amber";
+          const sum = sw.summary && Object.keys(sw.summary).length
+            ? `IOC=${sw.summary.IOC ?? "?"} PERSIST=${sw.summary.PERSIST ?? "?"} REVIEW=${sw.summary.REVIEW ?? "?"}`
+            : "";
+          sweepHtml = `
+            <div class="sweep-box">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:4px;">
+                <span class="pill ${swClass}">${esc(sw.verdict || sw.status)}</span>
+                <button class="btn" style="min-height:28px;padding:3px 8px;font-size:0.75rem;" data-action="log" data-dev-id="${esc(dev.id)}">View Log</button>
+              </div>
+              <div class="sub">${esc(sum)} ${sum ? "•" : ""} ${esc(sw.timestamp || "")}</div>
+            </div>`;
+        }
+
+        const openBtn = dev.launch_url
+          ? `<a class="btn btn-primary" href="${esc(dev.launch_url)}" target="_blank" rel="noopener">Open ${esc(dev.model)} ${dev.role === "van_router" ? "Admin UI" : "Console"} ↗</a>`
+          : "";
+
+        let vanHtml = "";
+        if (dev.role === "van_router") {
+          const vw = st.van_wan;
+          if (vw) {
+            const activeWan = vw.active_wan || "offline";
+            const wanPillClass = activeWan === "cpe" ? "pill-green" : activeWan === "starlink" ? "pill-amber" : "pill-red";
+            const wanLabel = activeWan === "cpe" ? "GROOVE CPE" : activeWan === "starlink" ? "STARLINK" : "OFFLINE";
+            const sl = vw.starlink || {};
+            const pct = Math.min(100, Number(sl.pct_used || 0));
+            const barColor = pct >= 95 ? "var(--red)" : pct >= 80 ? "var(--amber)" : "var(--green)";
+            const cpe = vw.cpe || {};
+            const g = vw.groove || {};
+            const vpn = vw.vpn || {};
+            const vpnSt = vpn.state || "killswitch_locked";
+            let vpnPill = `<span class="pill pill-red">VPN KILLSWITCH LOCKED</span>`;
+            if (vpnSt === "encrypted") vpnPill = `<span class="pill pill-green">VPN ENCRYPTED (wg_van)</span>`;
+            else if (vpnSt === "trusted_direct") vpnPill = `<span class="pill pill-blue">TRUSTED DIRECT</span>`;
+            else if (vpnSt === "captive_temp") vpnPill = `<span class="pill pill-amber">CAPTIVE LOGIN (TEMP DIRECT)</span>`;
+            const curMode = vw.mode || "auto";
+            const modeBtns = [
+              ["auto", "Auto"],
+              ["captive_login", "Captive (10m)"],
+              ["force_cpe", "Force CPE"],
+              ["force_starlink", "Force Starlink"],
+            ].map(([m, label]) =>
+              `<button class="btn ${curMode === m ? "btn-mode-active" : ""}" style="min-height:36px;padding:6px 8px;font-size:0.78rem;" data-action="wan-mode" data-mode="${m}" data-dev-id="${esc(dev.id)}" data-dev-name="${esc(dev.name)}">${label}</button>`
+            ).join("");
+            vanHtml = `
+              <div class="van-box">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;">
+                  <span class="pill ${wanPillClass}">WAN: ${wanLabel}</span>
+                  ${vpnPill}
+                </div>
+                <div>
+                  <div style="display:flex;justify-content:space-between;"><span>Starlink Budget</span><span>${esc(sl.monthly_gb ?? 0)} / ${esc(sl.cap_gb ?? 50)} GB (${pct}%)</span></div>
+                  <div class="budget-bar"><div class="budget-fill" style="width:${pct}%;background:${barColor};"></div></div>
+                </div>
+                <div class="sub">
+                  Groove: ${g.reachable ? `${esc(g.ssid || "—")} (${esc(g.rssi_dbm ?? "?")} dBm)` : "telemetry offline"} •
+                  CPE: ${esc(cpe.rtt_ms ?? "—")}ms / ${esc(cpe.loss_pct ?? "—")}% loss${cpe.captive_detected ? " • CAPTIVE PORTAL" : ""}
+                </div>
+                <div class="mode-grid">${modeBtns}</div>
+                <div class="mode-grid">
+                  <button class="btn" style="min-height:36px;padding:6px 8px;font-size:0.78rem;" data-action="hunt-scan" data-dev-id="${esc(dev.id)}" data-dev-name="${esc(dev.name)}" ${dev.hunt_running ? "disabled" : ""}>${dev.hunt_running ? "Scanning..." : "Scan Nearby Wi-Fi"}</button>
+                  <button class="btn" style="min-height:36px;padding:6px 8px;font-size:0.78rem;" data-action="open-networks" data-dev-id="${esc(dev.id)}" data-dev-name="${esc(dev.name)}">Known Wi-Fi</button>
+                </div>
+              </div>`;
+          } else {
+            vanHtml = `<div class="van-box"><div class="sub">Waiting for van-wan-guard telemetry (connect via WireGuard 192.168.2.5 or run setup-mt3000.sh).</div></div>`;
+          }
+        }
+
+        const sshBtns = dev.ssh_enabled ? `
+          <div class="actions">
+            <button class="btn" data-action="sweep" data-dev-id="${esc(dev.id)}" data-dev-name="${esc(dev.name)}" ${dev.sweep_running ? "disabled" : ""}>
+              ${dev.sweep_running ? "Sweeping..." : "Run Triage Sweep"}
+            </button>
+            <button class="btn" data-action="disable-cloud" data-dev-id="${esc(dev.id)}" data-dev-name="${esc(dev.name)}">Force Cloud OFF</button>
+            <button class="btn btn-danger" style="grid-column:1 / -1;" data-action="reboot" data-dev-id="${esc(dev.id)}" data-dev-name="${esc(dev.name)}">Reboot Device</button>
+          </div>` : "";
+
+        return `
+          <article class="card">
+            <div class="card-head">
+              <div class="card-title">
+                <span class="dot ${online ? "dot-on" : "dot-off"}"></span>
+                <span>${esc(dev.name)}</span>
+              </div>
+              <span class="pill ${online ? "pill-green" : "pill-red"}">${online ? "ONLINE" : "OFFLINE"}</span>
+            </div>
+            <div class="badges">${vlanPill}${cloudPill}</div>
+            <dl class="meta">
+              <dt>IP</dt><dd>${esc(st.ip || "—")} <span class="sub">(${esc(st.source || "?")})</span></dd>
+              <dt>MAC</dt><dd>${esc(dev.mac)}</dd>
+              <dt>Firmware</dt><dd>${esc(st.fw || (dev.ssh_enabled ? "—" : "OpenWrt"))}</dd>
+              <dt>Uptime</dt><dd>${esc(st.uptime || "—")}</dd>
+              ${st.ssh_error ? `<dt>SSH</dt><dd style="color:#fca5a5;">${esc(st.ssh_error)}</dd>` : ""}
+            </dl>
+            ${vanHtml}
+            ${openBtn}
+            ${dev.ssh_enabled ? sweepHtml : ""}
+            ${sshBtns}
+          </article>`;
+      }).join("");
+    }
+
+    async function refreshAll(forcePost) {
+      const btn = document.getElementById("refresh-btn");
+      btn.disabled = true;
+      try {
+        let data;
+        if (forcePost) {
+          data = await apiPost("/api/refresh");
+        } else {
+          const r = await fetch("/api/devices", { cache: "no-store" });
+          if (!r.ok) {
+            const errData = await r.json().catch(() => ({}));
+            throw new Error(errData.error || `HTTP ${r.status}`);
+          }
+          data = await r.json();
+        }
+        render(data);
+      } catch (err) {
+        showToast(`Refresh failed: ${err.message}`);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    document.getElementById("device-grid").addEventListener("click", (ev) => {
+      const btn = ev.target.closest("button[data-action]");
+      if (!btn) return;
+      const action = btn.dataset.action;
+      const id = btn.dataset.devId;
+      const name = btn.dataset.devName || id;
+      if (action === "log") openLog(id);
+      else if (action === "sweep") runSweep(id, name);
+      else if (action === "disable-cloud") disableCloud(id, name);
+      else if (action === "reboot") rebootDevice(id, name);
+      else if (action === "wan-mode") setWanMode(id, name, btn.dataset.mode);
+      else if (action === "hunt-scan") runHuntScan(id, name);
+      else if (action === "open-networks") openNetworksModal(id, name);
+    });
+
+    document.getElementById("wifi-modal-body").addEventListener("click", async (ev) => {
+      const btn = ev.target.closest("button[data-wifi-action]");
+      if (!btn || !wifiModalDevId) return;
+      const act = btn.dataset.wifiAction;
+      if (act === "connect") {
+        btn.disabled = true;
+        showToast(`Connecting & verifying VPN on ${btn.dataset.ssid}...`);
+        try {
+          const res = await apiPost(`/api/devices/${wifiModalDevId}/hunt-connect`, {
+            ssid: btn.dataset.ssid,
+            bssid: btn.dataset.bssid || "",
+          });
+          showToast(res.captive_required ? `Captive portal on ${btn.dataset.ssid} — tap Captive (10m)` : `Connected to ${btn.dataset.ssid}`);
+          closeWifiModal();
+          await refreshAll(false);
+        } catch (err) { showToast(`Connect failed: ${err.message}`); }
+        finally { btn.disabled = false; }
+      } else if (act === "delete") {
+        try {
+          await apiPost(`/api/devices/${wifiModalDevId}/networks`, { action: "delete", ssid: btn.dataset.ssid });
+          showToast(`Deleted ${btn.dataset.ssid}`);
+          await openNetworksModal(wifiModalDevId, wifiModalDevName || wifiModalDevId);
+        } catch (err) { showToast(`Delete failed: ${err.message}`); }
+      } else if (act === "toggle-hunt") {
+        try {
+          await apiPost(`/api/devices/${wifiModalDevId}/hunt-config`, { auto_hunt: btn.dataset.next === "true" });
+          showToast("Updated Auto-Hunt setting");
+          await openNetworksModal(wifiModalDevId, wifiModalDevName || wifiModalDevId);
+        } catch (err) { showToast(`Update failed: ${err.message}`); }
+      }
+    });
+
+    refreshAll(false);
+    setInterval(() => refreshAll(false), 30000);
+  </script>
+</body>
+</html>

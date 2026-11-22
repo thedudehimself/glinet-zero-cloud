@@ -1,0 +1,18 @@
+[Unit]
+Description=GL.iNet Portal Isolated Nginx Reverse Proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStartPre=/bin/mkdir -p /run/glinet-portal/tmp
+ExecStartPre=/bin/sh -c '[ -f /run/glinet-portal/upstreams.conf ] || /usr/bin/python3 __REMOTE_DIR__/src/nginx_sync.py --seed __REMOTE_DIR__/devices.json /run/glinet-portal/upstreams.conf'
+ExecStart=/usr/sbin/nginx -g 'daemon off;' -c __REMOTE_DIR__/nginx.conf
+ExecReload=/usr/sbin/nginx -s reload -c __REMOTE_DIR__/nginx.conf
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

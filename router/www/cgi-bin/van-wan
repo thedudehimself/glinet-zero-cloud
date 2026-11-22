@@ -1,0 +1,164 @@
+#!/bin/sh
+# CSRF-protected uhttpd CGI endpoint for offline LAN control UI (bound strictly to LAN IP, blocked from guest/WAN).
+set -eu
+
+CLI="${VAN_CLI:-/usr/bin/van-wan}"
+LIB_PATH="${VAN_LIB_PATH:-/usr/libexec/van-wan-guard/lib.sh}"
+CONF_DIR="${VAN_CONF_DIR:-/etc/van-wan-guard}"
+# shellcheck source=../../usr/libexec/van-wan-guard/lib.sh
+. "$LIB_PATH"
+
+respond() {
+    _code="$1"
+    _text="$2"
+    _body="$3"
+    # Guarantee valid JSON response even if a subcommand emitted plain-text stderr
+    case "$_body" in
+        \{*|\[*) ;;
+        *) _body="$(printf '{"ok":false,"error":"%s"}' "$(json_escape "$_body")")" ;;
+    esac
+    printf 'Status: %s %s\r\n' "$_code" "$_text"
+    printf 'Content-Type: application/json; charset=utf-8\r\n'
+    printf 'Cache-Control: no-store, no-cache, must-revalidate, max-age=0\r\n'
+    printf '\r\n%s\n' "$_body"
+    exit 0
+}
+
+# Optional bearer token guard when /etc/van-wan-guard/ui_token exists (0600)
+if [ -s "${CONF_DIR}/ui_token" ]; then
+    _expected="$(tr -d '\r\n' < "${CONF_DIR}/ui_token" 2>/dev/null || true)"
+    _got="${HTTP_X_VAN_TOKEN:-}"
+    if [ -n "$_expected" ] && [ "$_got" != "$_expected" ]; then
+        respond 401 "Unauthorized" '{"error":"missing or invalid X-Van-Token"}'
+    fi
+fi
+
+method="${REQUEST_METHOD:-GET}"
+if [ "$method" = "GET" ]; then
+    case "${QUERY_STRING:-}" in
+        *resource=networks*)
+            out="$("$CLI" networks list 2>/dev/null || printf '{"ok":false,"error":"unavailable"}')"
+            ;;
+        *)
+            out="$("$CLI" status 2>/dev/null || printf '{"ok":false,"error":"unavailable"}')"
+            ;;
+    esac
+    respond 200 "OK" "$out"
+fi
+
+if [ "$method" != "POST" ]; then
+    respond 405 "Method Not Allowed" '{"error":"method not allowed"}'
+fi
+
+# CSRF guard: require X-Van-Action: 1 and strict Origin host/port match
+if [ "${HTTP_X_VAN_ACTION:-}" != "1" ]; then
+    respond 403 "Forbidden" '{"error":"missing X-Van-Action header"}'
+fi
+
+origin="${HTTP_ORIGIN:-}"
+expected_host="${HTTP_HOST:-192.168.8.1:8080}"
+expected_ip="${expected_host%%:*}"
+_orig_ok=0
+if printf '%s\n' "$expected_ip" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$'; then
+    expected_ip_re="$(printf '%s' "$expected_ip" | sed 's/\./\\./g')"
+    if printf '%s\n' "$origin" | grep -Eq "^https?://${expected_ip_re}(:[0-9]+)?$"; then
+        _orig_ok=1
+    fi
+fi
+if [ "$_orig_ok" != "1" ] && printf '%s\n' "$origin" | grep -Eq '^https?://192\.168\.8\.1(:[0-9]+)?$'; then
+    _orig_ok=1
+fi
+if [ "$_orig_ok" != "1" ]; then
+    respond 403 "Forbidden" '{"error":"origin not allowed"}'
+fi
+
+clen="${CONTENT_LENGTH:-0}"
+case "$clen" in
+    ''|*[!0-9]*) respond 400 "Bad Request" '{"error":"invalid content-length"}' ;;
+esac
+if [ "$clen" -gt 8192 ]; then
+    respond 413 "Payload Too Large" '{"error":"payload too large"}'
+fi
+
+body=""
+if [ "$clen" -gt 0 ]; then
+    body="$(dd bs=1 count="$clen" 2>/dev/null || true)"
+fi
+
+tmp_body="$(mktemp)"
+trap 'rm -f "$tmp_body"' EXIT
+printf '%s' "$body" > "$tmp_body"
+
+action="$(json_get_val "$tmp_body" "action" "")"
+if [ -n "$action" ]; then
+    case "$action" in
+        reset-usage)
+            out="$("$CLI" reset-usage 2>&1)" || respond 500 "Internal Server Error" "$out"
+            respond 200 "OK" "$out"
+            ;;
+        hunt-scan)
+            rc=0
+            out="$("$CLI" hunt-scan 2>&1)" || rc=$?
+            [ "$rc" -eq 3 ] && respond 409 "Conflict" "$out"
+            [ "$rc" -ne 0 ] && respond 502 "Bad Gateway" "$out"
+            respond 200 "OK" "$out"
+            ;;
+        hunt-connect)
+            rc=0
+            out="$("$CLI" hunt-connect --stdin < "$tmp_body" 2>&1)" || rc=$?
+            [ "$rc" -eq 3 ] && respond 409 "Conflict" "$out"
+            [ "$rc" -eq 2 ] && respond 400 "Bad Request" "$out"
+            [ "$rc" -ne 0 ] && respond 502 "Bad Gateway" "$out"
+            respond 200 "OK" "$out"
+            ;;
+        hunt-config)
+            rc=0
+            out="$("$CLI" hunt-config < "$tmp_body" 2>&1)" || rc=$?
+            [ "$rc" -eq 2 ] && respond 400 "Bad Request" "$out"
+            [ "$rc" -ne 0 ] && respond 500 "Internal Server Error" "$out"
+            respond 200 "OK" "$out"
+            ;;
+        networks-upsert)
+            rc=0
+            out="$("$CLI" networks upsert < "$tmp_body" 2>&1)" || rc=$?
+            [ "$rc" -eq 2 ] && respond 400 "Bad Request" "$out"
+            [ "$rc" -ne 0 ] && respond 500 "Internal Server Error" "$out"
+            respond 200 "OK" "$out"
+            ;;
+        networks-delete)
+            rc=0
+            out="$("$CLI" networks delete --stdin < "$tmp_body" 2>&1)" || rc=$?
+            [ "$rc" -eq 2 ] && respond 400 "Bad Request" "$out"
+            [ "$rc" -ne 0 ] && respond 500 "Internal Server Error" "$out"
+            respond 200 "OK" "$out"
+            ;;
+        networks-block)
+            rc=0
+            out="$("$CLI" networks block --stdin < "$tmp_body" 2>&1)" || rc=$?
+            [ "$rc" -eq 2 ] && respond 400 "Bad Request" "$out"
+            [ "$rc" -ne 0 ] && respond 500 "Internal Server Error" "$out"
+            respond 200 "OK" "$out"
+            ;;
+        networks-unblock)
+            rc=0
+            out="$("$CLI" networks unblock --stdin < "$tmp_body" 2>&1)" || rc=$?
+            [ "$rc" -eq 2 ] && respond 400 "Bad Request" "$out"
+            [ "$rc" -ne 0 ] && respond 500 "Internal Server Error" "$out"
+            respond 200 "OK" "$out"
+            ;;
+        *)
+            respond 400 "Bad Request" '{"error":"invalid action"}'
+            ;;
+    esac
+fi
+
+mode="$(json_get_val "$tmp_body" "mode" "")"
+case "$mode" in
+    auto|captive_login|force_cpe|force_starlink)
+        out="$("$CLI" mode "$mode" 2>&1)" || respond 500 "Internal Server Error" "$out"
+        respond 200 "OK" "$out"
+        ;;
+    *)
+        respond 400 "Bad Request" '{"error":"invalid mode"}'
+        ;;
+esac

@@ -1,0 +1,58 @@
+{
+  "tailscale_host": "gateway.tailnet-example.ts.net",
+  "allowed_tailscale_users": [
+    "alice@example.com"
+  ],
+  "allowed_tailscale_ips": [
+    "100.64.0.10"
+  ],
+  "devices": [
+    {
+      "id": "rm1pe",
+      "name": "GLKVM RM1PE",
+      "role": "kvm",
+      "model": "RM1PE",
+      "mac": "02:00:5e:00:53:01",
+      "fallback_ip": "10.10.20.11",
+      "preferred_vlan": "vlan20",
+      "scheme": "https",
+      "upstream_port": 443,
+      "proxy_local_port": 8451,
+      "tailscale_port": 8441,
+      "ssh_enabled": true,
+      "ssh_user": "root"
+    },
+    {
+      "id": "rm10",
+      "name": "GLKVM RM10",
+      "role": "kvm",
+      "model": "RM10",
+      "mac": "02:00:5e:00:53:02",
+      "fallback_ip": "10.10.20.12",
+      "preferred_vlan": "vlan20",
+      "scheme": "https",
+      "upstream_port": 443,
+      "proxy_local_port": 8452,
+      "tailscale_port": 8442,
+      "ssh_enabled": true,
+      "ssh_user": "root"
+    },
+    {
+      "id": "mt3000",
+      "name": "GL-MT3000 (Mobile Router)",
+      "role": "van_router",
+      "model": "GL-MT3000",
+      "mac": "02:00:5e:00:53:03",
+      "fallback_ip": "10.10.10.50",
+      "wg_ip": "192.168.2.5",
+      "wg_iface": "wg0",
+      "preferred_vlan": "vlan10",
+      "scheme": "http",
+      "upstream_port": 80,
+      "proxy_local_port": 8455,
+      "tailscale_port": 8445,
+      "ssh_enabled": true,
+      "ssh_user": "root"
+    }
+  ]
+}

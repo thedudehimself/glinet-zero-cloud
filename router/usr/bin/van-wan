@@ -1,0 +1,162 @@
+#!/bin/sh
+# CLI controller for van-wan-guard & wifi-hunter on GL-MT3000.
+set -eu
+
+CONF_DIR="${VAN_CONF_DIR:-/etc/van-wan-guard}"
+STATE_DIR="${VAN_STATE_DIR:-/var/run/van-wan-guard}"
+LIB_DIR="${VAN_LIB_DIR:-$(dirname "$0")/../libexec/van-wan-guard}"
+if [ ! -f "${LIB_DIR}/lib.sh" ]; then
+    LIB_DIR="/usr/libexec/van-wan-guard"
+fi
+LIB_PATH="${VAN_LIB_PATH:-${LIB_DIR}/lib.sh}"
+NET_LUA="${LIB_DIR}/networks.lua"
+HUNTER_SH="${LIB_DIR}/wifi-hunter.sh"
+KNOWN_FILE="${CONF_DIR}/known_networks.json"
+
+# shellcheck source=../libexec/van-wan-guard/lib.sh
+. "$LIB_PATH"
+
+signal_daemon() {
+    if [ -f "${STATE_DIR}/daemon.pid" ]; then
+        _pid="$(cat "${STATE_DIR}/daemon.pid" 2>/dev/null || true)"
+        if [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null; then
+            kill -USR1 "$_pid" 2>/dev/null || true
+        fi
+    fi
+}
+
+cmd="${1:-status}"
+case "$cmd" in
+    status)
+        if [ -f "${STATE_DIR}/status.json" ]; then
+            cat "${STATE_DIR}/status.json"
+        else
+            printf '{"ok":false,"error":"status not yet available"}\n'
+        fi
+        ;;
+    mode)
+        new_mode="${2:-}"
+        case "$new_mode" in
+            auto|force_cpe|force_starlink)
+                mkdir -p "$CONF_DIR" "$STATE_DIR"
+                rm -f "${STATE_DIR}/override.json"
+                atomic_write_file "${CONF_DIR}/mode.json" "{\"mode\":\"${new_mode}\"}"
+                signal_daemon
+                printf '{"ok":true,"mode":"%s","expires_at":0}\n' "$new_mode"
+                ;;
+            captive_login)
+                mkdir -p "$CONF_DIR" "$STATE_DIR"
+                ov_sec="$(json_get_val "${CONF_DIR}/config.json" "captive_override_sec" "600")"
+                now="$(date +%s)"
+                exp=$((now + ov_sec))
+                atomic_write_file "${CONF_DIR}/mode.json" '{"mode":"auto"}'
+                atomic_write_file "${STATE_DIR}/override.json" "{\"mode\":\"captive_login\",\"expires_at\":${exp}}"
+                signal_daemon
+                printf '{"ok":true,"mode":"captive_login","expires_at":%d}\n' "$exp"
+                ;;
+            *)
+                printf '{"ok":false,"error":"invalid mode (allowed: auto|captive_login|force_cpe|force_starlink)"}\n' >&2
+                exit 2
+                ;;
+        esac
+        ;;
+    reset-usage)
+        mkdir -p "$CONF_DIR" "$STATE_DIR"
+        reset_day="$(json_get_val "${CONF_DIR}/config.json" "billing_reset_day" "1")"
+        cycle_key="$(compute_cycle_key "$(date +%Y)" "$(date +%m)" "$(date +%d)" "$reset_day")"
+        sl_iface="$(json_get_val "${CONF_DIR}/config.json" "starlink_iface" "eth1")"
+        rx="$(cat "/sys/class/net/${sl_iface}/statistics/rx_bytes" 2>/dev/null || echo 0)"
+        tx="$(cat "/sys/class/net/${sl_iface}/statistics/tx_bytes" 2>/dev/null || echo 0)"
+        curr="$(awk -v r="$rx" -v t="$tx" 'BEGIN { r+=0; t+=0; printf "%.0f\n", r + t }')"
+        ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        atomic_write_file "${CONF_DIR}/usage_reset.pending" "${cycle_key} ${curr} ${ts}"
+        atomic_write_file "${CONF_DIR}/starlink_usage.json" \
+            "{\"cycle_key\":\"${cycle_key}\",\"last_iface_bytes\":${curr},\"total_bytes\":0,\"updated_at\":\"${ts}\"}"
+        signal_daemon
+        printf '{"ok":true,"cycle_key":"%s","total_bytes":0}\n' "$cycle_key"
+        ;;
+    hunt-scan)
+        exec "$HUNTER_SH" scan
+        ;;
+    hunt-connect)
+        if [ "${2:-}" = "--stdin" ]; then
+            _body="$(cat)"
+            _ssid="$(printf '%s\n' "$_body" | awk '{ if (match($0, /"ssid"[[:space:]]*:[[:space:]]*"([^"]*)"/)) { s=substr($0, RSTART, RLENGTH); sub(/^"ssid"[[:space:]]*:[[:space:]]*"/, "", s); sub(/"$/, "", s); print s; exit } }')"
+            _bssid="$(printf '%s\n' "$_body" | awk '{ if (match($0, /"bssid"[[:space:]]*:[[:space:]]*"([^"]*)"/)) { s=substr($0, RSTART, RLENGTH); sub(/^"bssid"[[:space:]]*:[[:space:]]*"/, "", s); sub(/"$/, "", s); print s; exit } }')"
+            if command -v lua >/dev/null 2>&1; then
+                _parsed="$(printf '%s\n' "$_body" | lua -e 'local j=require("luci.jsonc").parse(io.stdin:read("*a") or ""); if type(j)=="table" and type(j.ssid)=="string" then io.stdout:write((type(j.bssid)=="string" and j.bssid or "").."\t"..j.ssid) end' 2>/dev/null || true)"
+                if [ -n "$_parsed" ]; then
+                    _bssid="${_parsed%%	*}"
+                    _ssid="${_parsed#*	}"
+                fi
+            fi
+            exec "$HUNTER_SH" connect "$_ssid" "$_bssid"
+        fi
+        exec "$HUNTER_SH" connect "${2:-}" "${3:-}"
+        ;;
+    hunt-toggle)
+        _val="${2:-}"
+        case "$_val" in
+            on|true|1)
+                printf '{"auto_hunt":true}\n' | lua "$NET_LUA" set-config "$KNOWN_FILE"
+                signal_daemon
+                ;;
+            off|false|0)
+                printf '{"auto_hunt":false}\n' | lua "$NET_LUA" set-config "$KNOWN_FILE"
+                signal_daemon
+                ;;
+            *)
+                printf '{"ok":false,"error":"usage: van-wan hunt-toggle <on|off>"}\n' >&2
+                exit 2
+                ;;
+        esac
+        ;;
+    hunt-config)
+        lua "$NET_LUA" set-config "$KNOWN_FILE"
+        signal_daemon
+        ;;
+    networks)
+        sub="${2:-list}"
+        case "$sub" in
+            list)
+                lua "$NET_LUA" list "$KNOWN_FILE"
+                ;;
+            upsert)
+                lua "$NET_LUA" upsert "$KNOWN_FILE"
+                signal_daemon
+                ;;
+            delete)
+                if [ "${3:-}" = "--stdin" ] || [ -z "${3:-}" ]; then
+                    lua "$NET_LUA" delete-stdin "$KNOWN_FILE"
+                else
+                    lua "$NET_LUA" delete "$KNOWN_FILE" "$3"
+                fi
+                signal_daemon
+                ;;
+            block)
+                if [ "${3:-}" = "--stdin" ] || [ -z "${3:-}" ]; then
+                    lua "$NET_LUA" block-stdin "$KNOWN_FILE"
+                else
+                    lua "$NET_LUA" block "$KNOWN_FILE" "$3"
+                fi
+                signal_daemon
+                ;;
+            unblock)
+                if [ "${3:-}" = "--stdin" ] || [ -z "${3:-}" ]; then
+                    lua "$NET_LUA" unblock-stdin "$KNOWN_FILE"
+                else
+                    lua "$NET_LUA" unblock "$KNOWN_FILE" "$3"
+                fi
+                signal_daemon
+                ;;
+            *)
+                printf '{"ok":false,"error":"usage: van-wan networks {list|upsert|delete|block|unblock}"}\n' >&2
+                exit 2
+                ;;
+        esac
+        ;;
+    *)
+        printf 'Usage: van-wan {status|mode <auto|captive_login|force_cpe|force_starlink>|reset-usage|hunt-scan|hunt-connect|hunt-toggle|hunt-config|networks}\n' >&2
+        exit 2
+        ;;
+esac

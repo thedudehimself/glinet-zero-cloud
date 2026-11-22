@@ -1,0 +1,46 @@
+worker_processes 1;
+pid /run/glinet-portal/nginx.pid;
+error_log stderr warn;
+
+events {
+    worker_connections 256;
+}
+
+http {
+    access_log off;
+    sendfile on;
+    tcp_nopush on;
+    keepalive_timeout 65;
+
+    client_body_temp_path /run/glinet-portal/tmp/body;
+    proxy_temp_path /run/glinet-portal/tmp/proxy;
+    fastcgi_temp_path /run/glinet-portal/tmp/fastcgi;
+    uwsgi_temp_path /run/glinet-portal/tmp/uwsgi;
+    scgi_temp_path /run/glinet-portal/tmp/scgi;
+
+    map $http_upgrade $connection_upgrade {
+        default upgrade;
+        '' close;
+    }
+
+    map $http_tailscale_user_login $ts_user_state {
+        default deny;
+        "" empty;
+__TS_USER_RULES__
+    }
+
+    map $http_x_forwarded_for $ts_ip_allowed {
+        default 0;
+__TS_IP_RULES__
+    }
+
+    map "$ts_user_state:$ts_ip_allowed" $ts_allowed {
+        default 0;
+        "~^allow:" 1;
+        "empty:1" 1;
+    }
+
+    include /run/glinet-portal/upstreams.conf;
+
+__SERVER_BLOCKS__
+}

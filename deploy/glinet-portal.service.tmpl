@@ -1,0 +1,23 @@
+[Unit]
+Description=GL.iNet Private Management Portal (Tailscale-only)
+After=network-online.target glinet-portal-nginx.service
+Wants=network-online.target glinet-portal-nginx.service
+
+[Service]
+Type=simple
+Environment=PYTHONPATH=__REMOTE_DIR__/src
+ExecStart=/usr/bin/python3 __REMOTE_DIR__/src/portal.py \
+  --config __REMOTE_DIR__/devices.json \
+  --db __REMOTE_DIR__/state.db \
+  --triage __REMOTE_DIR__/gl-helper-triage.sh \
+  --key __REMOTE_DIR__/id_ed25519 \
+  --nginx-conf __REMOTE_DIR__/nginx.conf \
+  --upstreams /run/glinet-portal/upstreams.conf \
+  --nginx-pid /run/glinet-portal/nginx.pid
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

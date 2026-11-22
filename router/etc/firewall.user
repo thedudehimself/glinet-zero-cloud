@@ -1,0 +1,37 @@
+# Fail-closed boot-time CPE VPN killswitch & IPv6 leak block for GL.iNet 4.x / OpenWrt 21.02 (fw3/iptables).
+# Included on every fw3 reload (firewall.@include[...].reload='1').
+
+# 1. IPv4 Fail-Closed FORWARD Gate (unconditional on eth0, inserted at index 1 ABOVE RELATED,ESTABLISHED)
+iptables -w -N VAN_CPE_GATE 2>/dev/null || true
+iptables -w -I VAN_CPE_GATE 1 -j REJECT --reject-with icmp-admin-prohibited
+while [ "$(iptables -w -S VAN_CPE_GATE 2>/dev/null | grep -c '^-A ' || true)" -gt 1 ]; do
+    iptables -w -D VAN_CPE_GATE 2 2>/dev/null || break
+done
+
+while iptables -w -D FORWARD -o eth0 -j VAN_CPE_GATE 2>/dev/null; do :; done
+while iptables -w -D FORWARD -i br-lan -o eth0 -j VAN_CPE_GATE 2>/dev/null; do :; done
+while iptables -w -D FORWARD -i br-guest -o eth0 -j VAN_CPE_GATE 2>/dev/null; do :; done
+iptables -w -I FORWARD 1 -o eth0 -j VAN_CPE_GATE
+
+# 2. IPv4 Router OUTPUT DNS Killswitch (prevents dnsmasq cleartext DNS leaks on eth0)
+iptables -w -N VAN_CPE_DNS_OUT 2>/dev/null || true
+iptables -w -I VAN_CPE_DNS_OUT 1 -p udp --dport 53 -j REJECT
+iptables -w -I VAN_CPE_DNS_OUT 2 -p tcp --dport 53 -j REJECT
+iptables -w -I VAN_CPE_DNS_OUT 3 -p tcp --dport 853 -j REJECT
+while [ "$(iptables -w -S VAN_CPE_DNS_OUT 2>/dev/null | grep -c '^-A ' || true)" -gt 3 ]; do
+    iptables -w -D VAN_CPE_DNS_OUT 4 2>/dev/null || break
+done
+while iptables -w -D OUTPUT -o eth0 -j VAN_CPE_DNS_OUT 2>/dev/null; do :; done
+iptables -w -I OUTPUT 1 -o eth0 -j VAN_CPE_DNS_OUT
+
+# 3. Hard eth0-only transport lock for wg_van (fwmark 0x101 can NEVER exit eth1 Starlink)
+while iptables -w -D OUTPUT -m mark --mark 0x101 ! -o eth0 -j DROP 2>/dev/null; do :; done
+iptables -w -I OUTPUT 1 -m mark --mark 0x101 ! -o eth0 -j DROP
+
+# 4. IPv6 Total Leak Prevention on eth0
+if command -v ip6tables >/dev/null 2>&1; then
+    while ip6tables -w -D FORWARD -o eth0 -j REJECT 2>/dev/null; do :; done
+    while ip6tables -w -D OUTPUT -o eth0 -j REJECT 2>/dev/null; do :; done
+    ip6tables -w -I FORWARD 1 -o eth0 -j REJECT
+    ip6tables -w -I OUTPUT 1 -o eth0 -j REJECT
+fi

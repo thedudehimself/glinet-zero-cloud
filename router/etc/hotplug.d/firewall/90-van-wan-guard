@@ -1,0 +1,6 @@
+#!/bin/sh
+# Wake van-wan-guard immediately after fw3 reload so runtime gate state re-applies cleanly.
+if [ -f /var/run/van-wan-guard/daemon.pid ]; then
+    _pid="$(cat /var/run/van-wan-guard/daemon.pid 2>/dev/null || true)"
+    [ -n "$_pid" ] && kill -USR1 "$_pid" 2>/dev/null || true
+fi

@@ -1,0 +1,13 @@
+{
+  "auto_hunt": true,
+  "allow_xfinity": true,
+  "allow_open_wifi": true,
+  "min_rssi_dbm": -78,
+  "cooldown_sec": 7200,
+  "networks": [],
+  "blocklist": [
+    "DIRECT-*",
+    "HP-Print-*",
+    "TravelAP*"
+  ]
+}

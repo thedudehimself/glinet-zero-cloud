@@ -1,0 +1,16 @@
+# Local secrets, device inventory & runtime artifacts (NEVER commit!)
+config/devices.json
+vendor/
+*.conf
+*.key
+*.pub
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+known_hosts
+.pytest_cache/
+__pycache__/
+*.pyc
+.venv/
+.superpowers/
