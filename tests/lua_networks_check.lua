@@ -101,9 +101,9 @@ local scan_sample = table.concat({
     "AB 11:22:33:44:55:05 HomeWiFi 2412/20 -30 wpa2 2462/20        -67  -100  33  none",
     "AB 11:22:33:44:55:06 HomeWiFi 2412/x -30 wpa2  5180           -68  -100  32  none",
     "AP 11:22:33:44:55:07 UnknownPFlagNet           2437/20        -55  -108  53",
-    "11:22:33:44:55:08,'Campground WPA',2437/20/gn(24dBm),-58,802.11,privacy,",
+    "11:22:33:44:55:08,'Campground WPA',2437/20/gn(24dBm),-68,802.11,privacy,",
     "11:22:33:44:55:09,'HomeWiFi',2437/20/gn(24dBm),-46,802.11,,",
-    "11:22:33:44:55:0A,'HomeWiFi',2412/20,-30,802.11,privacy,2462/20,-66,802.11,,",
+    "11:22:33:44:55:0A,'HomeWiFi',2412/20,-30,privacy',2462/20,-66,802.11,,",
     "11:22:33:44:55:0B,'CSV Open Cafe',2462/20/gn(24dBm),-61,802.11,,",
 }, "\n")
 
@@ -111,7 +111,7 @@ local ok_rank, out_rank = run_cmd("lua " .. script .. " rank-scan " .. known .. 
 assert_eq(ok_rank, true, "rank-scan failed: " .. out_rank)
 local ranked = assert(jsonc.parse(out_rank), "rank-scan invalid JSON: " .. out_rank)
 
--- Expect: 1) HomeWiFi (WPA2, Tier 1), 2) Campground WPA (Tier 2), 3) xfinitywifi (Tier 3), 4) Free Cafe WiFi & Campground 2026 (Tier 4)
+-- Expect: 1) HomeWiFi (WPA2, Tier 1), 2-3) Campground WPA (Tier 2: -64, -68), 4) xfinitywifi (Tier 3)
 assert_eq(ranked[1].ssid, "HomeWiFi", "rank 1 must be trusted WPA2 HomeWiFi")
 assert_eq(ranked[1].tier, 1, "rank 1 must be tier 1")
 assert_eq(ranked[1].trusted, true, "rank 1 must be trusted")
@@ -119,9 +119,11 @@ assert_eq(ranked[1].profile, "van-psk", "rank 1 must use van-psk")
 assert_eq(ranked[2].ssid, "Campground WPA", "rank 2 must be Campground WPA")
 assert_eq(ranked[2].tier, 2, "rank 2 must be tier 2")
 assert_eq(ranked[2].trusted, false, "rank 2 must not be trusted")
-assert_eq(ranked[3].ssid, "xfinitywifi", "rank 3 must be xfinitywifi")
-assert_eq(ranked[3].tier, 3, "rank 3 must be tier 3")
-assert_eq(ranked[3].profile, "van-open", "rank 3 must use van-open")
+assert_eq(ranked[3].ssid, "Campground WPA", "rank 3 must be CSV Campground WPA")
+assert_eq(ranked[3].bssid, "11:22:33:44:55:08", "rank 3 must be CSV BSSID")
+assert_eq(ranked[4].ssid, "xfinitywifi", "rank 4 must be xfinitywifi")
+assert_eq(ranked[4].tier, 3, "rank 4 must be tier 3")
+assert_eq(ranked[4].profile, "van-open", "rank 4 must use van-open")
 
 -- Verify hostile SSIDs, weak RSSI, blocklisted TravelAP, cooled BSSID, unknown WPA2, AND open evil twin of saved WPA2 are NOT in ranked
 local saw_2026 = false
@@ -151,7 +153,7 @@ for _, c in ipairs(ranked) do
     if c.bssid == "11:22:33:44:55:08" then
         assert_eq(c.ssid, "Campground WPA", "CSV save-file row must parse exact SSID")
         assert_eq(c.security, "wpa2", "CSV privacy flag must classify as wpa2")
-        assert_eq(c.rssi_dbm, -58, "CSV RSSI must parse cleanly")
+        assert_eq(c.rssi_dbm, -68, "CSV RSSI must parse cleanly")
     end
     if c.bssid == "11:22:33:44:55:0A" then
         assert_eq(c.security, "open", "crafted CSV SSID must not spoof privacy")

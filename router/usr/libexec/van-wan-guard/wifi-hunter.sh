@@ -21,6 +21,9 @@ LOCK_DIR="${STATE_DIR}/hunter.lock"
 GROOVE_IP="$(json_get_val "$CFG" "groove_ip" "192.168.88.1")"
 GROOVE_USER="$(json_get_val "$CFG" "groove_user" "hunter")"
 GROOVE_KEY="$(json_get_val "$CFG" "groove_key" "${CONF_DIR}/groove_dropbear.key")"
+if [ ! -f "$GROOVE_KEY" ] && [ -f "${CONF_DIR}/groove_dropbear.key" ]; then
+    GROOVE_KEY="${CONF_DIR}/groove_dropbear.key"
+fi
 CPE_IFACE="$(json_get_val "$CFG" "cpe_iface" "eth0")"
 CPE_TABLE="$(json_get_val "$CFG" "cpe_table" "101")"
 CAPTIVE_URL="$(json_get_val "$CFG" "captive_url" "http://connectivitycheck.gstatic.com/generate_204")"
