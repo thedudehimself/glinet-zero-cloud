@@ -45,6 +45,10 @@ GATEWAY_HOST=root@<your-gateway-ip> ./deploy/deploy.sh
 
 `deploy.sh` runs the local unit tests, renders `nginx.conf` and systemd units dynamically from `config/devices.json`, provisions a dedicated Ed25519 key on the gateway, and configures `tailscale serve --bg` (never `tailscale funnel`).
 
+### KVM Hardware Hardening & Air-Gapped Firmware Upgrades (`V1.10.2+`)
+- **USB & HDMI EEPROM Spoofing (`deploy/harden-kvm.py`)**: Disables virtual USB mass storage (`kvmd.msd.type: disabled`, `otg.devices.msd.enabled: false`), sets realistic USB HID descriptors (`Logitech USB Receiver` `0x046d:0xc52b` or `Dell KB216` `0x413c:0x2113`), patches `/etc/kvmd/edid.json` (`DEL` PNP ID + valid byte-127 checksum), and **flashes the HDMI receiver EEPROM** via `POST /api/upgrade/edid` (`multipart/form-data` field `edid`, since editing `edid.json` alone leaves the old `GLKVM` EDID active in hardware). Also ensures `/etc/glinet/gl-cloud.conf` ends with a trailing newline so SSH probes never merge section headers onto the JSON line.
+- **Offline Firmware Upgrades (Air-Gapped VLANs)**: When KVMs sit on an internet-blocked VLAN, `/api/upgrade/compare` times out. Fetch the official `list-sha256.txt` from `https://fw.gl-inet.com/kvm/<model>/release/list-sha256.txt` on a connected workstation, verify the `.img` SHA-256, copy to `/userdata/update.img`, verify on-device with `fwtools verify /userdata/update.img /etc/firmware/key/public.raw && check_image_validity /userdata/update.img`, and trigger `POST /api/upgrade/start?keep_config=true`.
+
 ---
 
 ## Component 2: `van-wan-guard` (Fail-Closed VPN Gate + Multi-WAN + Wi-Fi Hunter)
