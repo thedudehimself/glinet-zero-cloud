@@ -331,7 +331,7 @@
     function openLog(deviceId) {
       const dev = latestData?.devices?.find(d => d.id === deviceId);
       if (!dev || !dev.last_sweep) return;
-      document.getElementById("modal-title").textContent = `${dev.name} — Sweep (${dev.last_sweep.timestamp})`;
+      document.getElementById("modal-title").textContent = `${dev.name} - Sweep (${dev.last_sweep.timestamp})`;
       document.getElementById("modal-body").textContent = dev.last_sweep.output || "(no output)";
       document.getElementById("log-modal").classList.add("open");
     }
@@ -349,7 +349,7 @@
     async function runHuntScan(id, name) {
       wifiModalDevId = id;
       wifiModalDevName = name;
-      document.getElementById("wifi-modal-title").textContent = `${name} — Nearby Wi-Fi Scan`;
+      document.getElementById("wifi-modal-title").textContent = `${name} - Nearby Wi-Fi Scan`;
       document.getElementById("wifi-modal-body").innerHTML = `<div class="sub">Scanning via GrooveA-52 (up to 15s)...</div>`;
       document.getElementById("wifi-modal").classList.add("open");
       try {
@@ -359,14 +359,17 @@
           document.getElementById("wifi-modal-body").innerHTML = `<div class="sub">No eligible APs above RSSI floor found.</div>`;
           return;
         }
-        document.getElementById("wifi-modal-body").innerHTML = cands.map(c => `
+        document.getElementById("wifi-modal-body").innerHTML = cands.map(c => {
+          const bandLbl = c.band === "5g" ? "5 GHz" : "2.4 GHz";
+          return `
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2);">
             <div>
               <strong>${esc(c.ssid)}</strong>
-              <div class="sub">Tier ${esc(c.tier)} • ${esc(c.rssi_dbm)} dBm • ${esc(c.security)} • ${c.trusted ? "Trusted (Direct)" : "VPN-Gated"}${c.cooled_down ? " • COOLDOWN (" + esc(c.cooldown_reason || "blocked") + ")" : ""}</div>
+              <div class="sub">${bandLbl} • Tier ${esc(c.tier)} • ${esc(c.rssi_dbm)} dBm • ${esc(c.security)} • ${c.trusted ? "Trusted (Direct)" : "VPN-Gated"}${c.cooled_down ? " • COOLDOWN (" + esc(c.cooldown_reason || "blocked") + ")" : ""}</div>
             </div>
-            <button class="btn" style="min-height:34px;padding:4px 10px;font-size:0.78rem;" data-wifi-action="connect" data-ssid="${esc(c.ssid)}" data-bssid="${esc(c.bssid || "")}">Connect</button>
-          </div>`).join("");
+            <button class="btn" style="min-height:34px;padding:4px 10px;font-size:0.78rem;" data-wifi-action="connect" data-ssid="${esc(c.ssid)}" data-bssid="${esc(c.bssid || "")}" data-band="${esc(c.band || "")}">Connect</button>
+          </div>`;
+        }).join("");
       } catch (err) {
         document.getElementById("wifi-modal-body").innerHTML = `<div class="sub" style="color:#fca5a5;">Scan failed: ${esc(err.message)}</div>`;
       }
@@ -375,7 +378,7 @@
     async function openNetworksModal(id, name) {
       wifiModalDevId = id;
       wifiModalDevName = name;
-      document.getElementById("wifi-modal-title").textContent = `${name} — Known Wi-Fi Allowlist`;
+      document.getElementById("wifi-modal-title").textContent = `${name} - Known Wi-Fi Allowlist`;
       document.getElementById("wifi-modal-body").innerHTML = `<div class="sub">Loading allowlist...</div>`;
       document.getElementById("wifi-modal").classList.add("open");
       try {
@@ -523,7 +526,7 @@
       if (alerts.length > 0) {
         list.style.display = "block";
         list.innerHTML = alerts.map(a =>
-          `<li>[${esc(a.severity)}] ${esc(a.device_id)} ${esc(a.src)} -> ${esc(a.dst)}:${esc(a.dport)} (${esc(a.proto)}) — ${esc(a.reason)}</li>`
+          `<li>[${esc(a.severity)}] ${esc(a.device_id)} ${esc(a.src)} -> ${esc(a.dst)}:${esc(a.dport)} (${esc(a.proto)}) - ${esc(a.reason)}</li>`
         ).join("");
       } else {
         list.style.display = "none";
@@ -610,8 +613,8 @@
                   <div class="budget-bar"><div class="budget-fill" style="width:${pct}%;background:${barColor};"></div></div>
                 </div>
                 <div class="sub">
-                  Groove: ${g.reachable ? `${esc(g.ssid || "—")} (${esc(g.rssi_dbm ?? "?")} dBm)` : "telemetry offline"} •
-                  CPE: ${esc(cpe.rtt_ms ?? "—")}ms / ${esc(cpe.loss_pct ?? "—")}% loss${cpe.captive_detected ? " • CAPTIVE PORTAL" : ""}
+                  Groove: ${g.reachable ? `${esc(g.ssid || "-")} (${esc(g.rssi_dbm ?? "?")} dBm)` : "telemetry offline"} •
+                  CPE: ${esc(cpe.rtt_ms ?? "-")}ms / ${esc(cpe.loss_pct ?? "-")}% loss${cpe.captive_detected ? " • CAPTIVE PORTAL" : ""}
                 </div>
                 <div class="mode-grid">${modeBtns}</div>
                 <div class="mode-grid">
@@ -645,10 +648,10 @@
             </div>
             <div class="badges">${vlanPill}${cloudPill}</div>
             <dl class="meta">
-              <dt>IP</dt><dd>${esc(st.ip || "—")} <span class="sub">(${esc(st.source || "?")})</span></dd>
+              <dt>IP</dt><dd>${esc(st.ip || "-")} <span class="sub">(${esc(st.source || "?")})</span></dd>
               <dt>MAC</dt><dd>${esc(dev.mac)}</dd>
-              <dt>Firmware</dt><dd>${esc(st.fw || (dev.ssh_enabled ? "—" : "OpenWrt"))}</dd>
-              <dt>Uptime</dt><dd>${esc(st.uptime || "—")}</dd>
+              <dt>Firmware</dt><dd>${esc(st.fw || (dev.ssh_enabled ? "-" : "OpenWrt"))}</dd>
+              <dt>Uptime</dt><dd>${esc(st.uptime || "-")}</dd>
               ${st.ssh_error ? `<dt>SSH</dt><dd style="color:#fca5a5;">${esc(st.ssh_error)}</dd>` : ""}
             </dl>
             ${vanHtml}
@@ -708,8 +711,9 @@
           const res = await apiPost(`/api/devices/${wifiModalDevId}/hunt-connect`, {
             ssid: btn.dataset.ssid,
             bssid: btn.dataset.bssid || "",
+            band: btn.dataset.band || "",
           });
-          showToast(res.captive_required ? `Captive portal on ${btn.dataset.ssid} — tap Captive (10m)` : `Connected to ${btn.dataset.ssid}`);
+          showToast(res.captive_required ? `Captive portal on ${btn.dataset.ssid} - tap Captive (10m)` : `Connected to ${btn.dataset.ssid}`);
           closeWifiModal();
           await refreshAll(false);
         } catch (err) { showToast(`Connect failed: ${err.message}`); }

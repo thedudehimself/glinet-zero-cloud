@@ -83,16 +83,19 @@ case "$cmd" in
             _body="$(cat)"
             _ssid="$(printf '%s\n' "$_body" | awk '{ if (match($0, /"ssid"[[:space:]]*:[[:space:]]*"([^"]*)"/)) { s=substr($0, RSTART, RLENGTH); sub(/^"ssid"[[:space:]]*:[[:space:]]*"/, "", s); sub(/"$/, "", s); print s; exit } }')"
             _bssid="$(printf '%s\n' "$_body" | awk '{ if (match($0, /"bssid"[[:space:]]*:[[:space:]]*"([^"]*)"/)) { s=substr($0, RSTART, RLENGTH); sub(/^"bssid"[[:space:]]*:[[:space:]]*"/, "", s); sub(/"$/, "", s); print s; exit } }')"
+            _band="$(printf '%s\n' "$_body" | awk '{ if (match($0, /"band"[[:space:]]*:[[:space:]]*"([^"]*)"/)) { s=substr($0, RSTART, RLENGTH); sub(/^"band"[[:space:]]*:[[:space:]]*"/, "", s); sub(/"$/, "", s); print s; exit } }')"
             if command -v lua >/dev/null 2>&1; then
-                _parsed="$(printf '%s\n' "$_body" | lua -e 'local j=require("luci.jsonc").parse(io.stdin:read("*a") or ""); if type(j)=="table" and type(j.ssid)=="string" then io.stdout:write((type(j.bssid)=="string" and j.bssid or "").."\t"..j.ssid) end' 2>/dev/null || true)"
+                _parsed="$(printf '%s\n' "$_body" | lua -e 'local j=require("luci.jsonc").parse(io.stdin:read("*a") or ""); if type(j)=="table" and type(j.ssid)=="string" then io.stdout:write((type(j.bssid)=="string" and j.bssid or "").."\t"..(type(j.band)=="string" and j.band or "").."\t"..j.ssid) end' 2>/dev/null || true)"
                 if [ -n "$_parsed" ]; then
                     _bssid="${_parsed%%	*}"
-                    _ssid="${_parsed#*	}"
+                    _rest="${_parsed#*	}"
+                    _band="${_rest%%	*}"
+                    _ssid="${_rest#*	}"
                 fi
             fi
-            exec "$HUNTER_SH" connect "$_ssid" "$_bssid"
+            exec "$HUNTER_SH" connect "$_ssid" "$_bssid" "$_band"
         fi
-        exec "$HUNTER_SH" connect "${2:-}" "${3:-}"
+        exec "$HUNTER_SH" connect "${2:-}" "${3:-}" "${4:-}"
         ;;
     hunt-toggle)
         _val="${2:-}"

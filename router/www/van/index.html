@@ -46,7 +46,7 @@
           <h1>Mobile Router WAN &amp; VPN Guard</h1>
           <div class="sub" id="updated">Loading...</div>
         </div>
-        <span class="pill" id="active-pill">—</span>
+        <span class="pill" id="active-pill">-</span>
       </div>
       <div class="row" style="margin-top:10px;">
         <span class="sub">Roof Wi-Fi Security Gate</span>
@@ -62,13 +62,13 @@
     </div>
 
     <div class="card">
-      <div class="row"><strong>Starlink 50 GB Monthly Budget</strong><span id="sl-text">—</span></div>
+      <div class="row"><strong>Starlink 50 GB Monthly Budget</strong><span id="sl-text">-</span></div>
       <div class="bar"><div class="fill" id="sl-fill" style="width:0%"></div></div>
       <div class="sub" id="sl-sub"></div>
     </div>
 
     <div class="card">
-      <div class="row"><strong>Roof GrooveA-52 CPE (eth0)</strong><span class="pill" id="cpe-pill">—</span></div>
+      <div class="row"><strong>Roof GrooveA-52 CPE (eth0)</strong><span class="pill" id="cpe-pill">-</span></div>
       <dl class="kv" id="cpe-kv"></dl>
     </div>
 
@@ -76,7 +76,7 @@
       <div class="row">
         <strong>Autonomous Wi-Fi Hunter</strong>
         <div style="display:flex;gap:8px;">
-          <button class="sm" id="auto-hunt-btn">Auto-Hunt: —</button>
+          <button class="sm" id="auto-hunt-btn">Auto-Hunt: -</button>
           <button class="sm" id="scan-btn">Scan Nearby Wi-Fi</button>
         </div>
       </div>
@@ -150,14 +150,17 @@
         box.innerHTML = '<div class="sub">No scan results yet. Tap Scan Nearby Wi-Fi.</div>';
         return;
       }
-      box.innerHTML = cands.map((c) => `
+      box.innerHTML = cands.map((c) => {
+        const bandLbl = c.band === "5g" ? "5 GHz" : "2.4 GHz";
+        return `
         <div class="item">
           <div>
             <strong>${esc(c.ssid)}</strong>
-            <div class="item-meta">Tier ${esc(c.tier)} • ${esc(c.rssi_dbm)} dBm • ${esc(c.security)} ${c.trusted ? "• Trusted" : "• VPN-Gated"} ${c.cooled_down ? "• COOLDOWN (" + esc(c.cooldown_reason || "blocked") + ")" : ""}</div>
+            <div class="item-meta">${bandLbl} • Tier ${esc(c.tier)} • ${esc(c.rssi_dbm)} dBm • ${esc(c.security)} ${c.trusted ? "• Trusted" : "• VPN-Gated"} ${c.cooled_down ? "• COOLDOWN (" + esc(c.cooldown_reason || "blocked") + ")" : ""}</div>
           </div>
-          <button class="sm" data-connect-ssid="${esc(c.ssid)}" data-connect-bssid="${esc(c.bssid || "")}">Connect</button>
-        </div>`).join("");
+          <button class="sm" data-connect-ssid="${esc(c.ssid)}" data-connect-bssid="${esc(c.bssid || "")}" data-connect-band="${esc(c.band || "")}">Connect</button>
+        </div>`;
+      }).join("");
     }
 
     async function loadNetworks() {
@@ -209,7 +212,7 @@
         const fill = document.getElementById("sl-fill");
         fill.style.width = pct + "%";
         fill.style.background = pct >= 95 ? "var(--r)" : pct >= 80 ? "var(--a)" : "var(--g)";
-        document.getElementById("sl-sub").textContent = `Cycle ${sl.cycle_key || "—"} • Link ${sl.link_up ? "UP (" + sl.ip + ")" : "DOWN"}`;
+        document.getElementById("sl-sub").textContent = `Cycle ${sl.cycle_key || "-"} • Link ${sl.link_up ? "UP (" + sl.ip + ")" : "DOWN"}`;
 
         const cpe = d.cpe || {};
         const g = d.groove || {};
@@ -218,11 +221,11 @@
         const cpeOk = (cpe.health === "healthy" || cpe.health === "healthy_vpn" || cpe.health === "healthy_trusted");
         cp.className = "pill " + (cpeOk ? "green" : cpe.health === "captive" ? "amber" : "red");
         document.getElementById("cpe-kv").innerHTML = [
-          ["SSID", g.reachable ? (g.ssid || "—") : "(Groove telemetry offline)"],
-          ["Signal", g.reachable && g.rssi_dbm != null ? g.rssi_dbm + " dBm" : "—"],
-          ["RTT / Loss", `${cpe.rtt_ms ?? "—"} ms / ${cpe.loss_pct ?? "—"}%`],
-          ["HTTP 204", `${cpe.http_code ?? "—"}${cpe.captive_detected ? " (CAPTIVE PORTAL)" : ""}`],
-          ["IP / GW", `${cpe.ip || "—"} / ${cpe.gw || "—"}`],
+          ["SSID", g.reachable ? (g.ssid || "-") : "(Groove telemetry offline)"],
+          ["Signal", g.reachable && g.rssi_dbm != null ? g.rssi_dbm + " dBm" : "-"],
+          ["RTT / Loss", `${cpe.rtt_ms ?? "-"} ms / ${cpe.loss_pct ?? "-"}%`],
+          ["HTTP 204", `${cpe.http_code ?? "-"}${cpe.captive_detected ? " (CAPTIVE PORTAL)" : ""}`],
+          ["IP / GW", `${cpe.ip || "-"} / ${cpe.gw || "-"}`],
         ].map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
 
         const h = d.hunter || {};
@@ -275,11 +278,12 @@
       btn.disabled = true;
       const ssid = btn.dataset.connectSsid;
       const bssid = btn.dataset.connectBssid;
+      const band = btn.dataset.connectBand;
       document.getElementById("msg").textContent = `Connecting & verifying VPN on ${ssid}...`;
       try {
-        const d = await postAction({ action: "hunt-connect", ssid, bssid });
+        const d = await postAction({ action: "hunt-connect", ssid, bssid, band });
         document.getElementById("msg").textContent = d.captive_required
-          ? `Connected to ${ssid} — captive portal detected. Tap Captive Login (10m).`
+          ? `Connected to ${ssid} - captive portal detected. Tap Captive Login (10m).`
           : `Connected to ${ssid} (${d.result || "ok"})`;
         setTimeout(load, 1000);
       } catch (e) {

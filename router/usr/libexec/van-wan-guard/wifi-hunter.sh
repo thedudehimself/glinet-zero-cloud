@@ -124,9 +124,22 @@ run_groove_connect_cmd() {
 }
 
 scan_groove_raw() {
-    # RouterOS v6: save-file CSV yields full 32-char SSIDs + explicit privacy flag without dropping active Wi-Fi
-    run_groove_ssh '/interface wireless scan wlan1 duration=4 background=yes save-file=van_scan.txt' 14 >/dev/null || true
-    _out="$(run_groove_ssh ':put [/file get van_scan.txt contents]; /file remove [find name="van_scan.txt"]' 10 || true)"
+    # Dual-band RouterOS v6 sweep in 2 batched SSH sessions (avoids saturating 600 MHz MIPS CPE):
+    # 1) Read active band + non-disruptive background scan on current band.
+    # 2) Switch to opposite band (2.4 GHz <-> 5 GHz), scan, and restore original band cleanly.
+    _out1="$(run_groove_ssh ':local ob [/interface wireless get [find default-name=wlan1] band]; :put ("ORIGBAND=" . $ob); /interface wireless scan wlan1 duration=4 background=yes save-file=van_scan1.txt; :put [/file get van_scan1.txt contents]; /file remove [find name="van_scan1.txt"]' 18 || true)"
+    _orig_band="$(printf '%s\n' "$_out1" | awk -F= '/^ORIGBAND=/ { gsub(/\r/, "", $2); print $2; exit }')"
+    _out2=""
+    case "$_orig_band" in
+        2ghz*)
+            _out2="$(run_groove_ssh ":if ([/interface wireless get [find default-name=wlan1] interface-type] ~ \"AR9300\") do={ /interface wireless set [find default-name=wlan1] band=5ghz-a/n channel-width=20/40mhz-XX } else={ :do { /interface wireless set [find default-name=wlan1] band=5ghz-a/n/ac channel-width=20/40/80mhz-XXXX } on-error={ /interface wireless set [find default-name=wlan1] band=5ghz-a/n channel-width=20/40mhz-XX } }; /interface wireless scan wlan1 duration=6 background=no save-file=van_scan2.txt; :put [/file get van_scan2.txt contents]; /file remove [find name=\"van_scan2.txt\"]; /interface wireless set [find default-name=wlan1] band=${_orig_band} channel-width=20/40mhz-XX" 22 || true)"
+            ;;
+        5ghz*)
+            _out2="$(run_groove_ssh "/interface wireless set [find default-name=wlan1] band=2ghz-b/g/n channel-width=20/40mhz-XX; /interface wireless scan wlan1 duration=5 background=no save-file=van_scan2.txt; :put [/file get van_scan2.txt contents]; /file remove [find name=\"van_scan2.txt\"]; :do { /interface wireless set [find default-name=wlan1] band=${_orig_band} } on-error={ /interface wireless set [find default-name=wlan1] band=5ghz-a/n }" 22 || true)"
+            ;;
+    esac
+    _out="${_out1}
+${_out2}"
     if ! printf '%s\n' "$_out" | grep -qE '[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}'; then
         _out="$(run_groove_ssh '/interface wireless scan wlan1 duration=5 background=no' 14 || true)"
     fi
@@ -185,6 +198,10 @@ extract_candidates_tsv() {
 associate_and_verify() {
     _ssid="$1"
     _bssid="${2:-}"
+    _band="${3:-}"
+    if [ -z "$_band" ] && [ -f "$HUNTER_STATE" ]; then
+        _band="$(lua "$NET_LUA" lookup-band "$HUNTER_STATE" "$_ssid" "$_bssid" 2>/dev/null | tr -d '\r\n' || true)"
+    fi
 
     # Critical fail-closed: clear any active captive_login override, lock VAN_CPE_GATE,
     # invalidate cached groove.json, and wake daemon.sh BEFORE switching APs
@@ -193,7 +210,7 @@ associate_and_verify() {
     atomic_write_file "${STATE_DIR}/groove.json" '{"reachable":false,"status":"associating","ssid":""}'
     signal_daemon
 
-    _ros_cmd="$(lua "$NET_LUA" ros-connect-cmd "$KNOWN_FILE" "$_ssid" "$_bssid" 2>/dev/null || true)"
+    _ros_cmd="$(lua "$NET_LUA" ros-connect-cmd "$KNOWN_FILE" "$_ssid" "$_bssid" "$_band" 2>/dev/null || true)"
     if [ -z "$_ros_cmd" ]; then
         printf 'invalid_target\n'
         return 1
@@ -203,12 +220,13 @@ associate_and_verify() {
         return 1
     fi
 
-    # Wait up to WAIT_DHCP_SEC for eth0 IP + gateway AND non-000 HTTP response (handles Groove NAT mode where eth0 already has IP)
-    _w=0
+    # Wait up to WAIT_DHCP_SEC (wall-clock) for eth0 IP + gateway AND non-000 HTTP response
+    # (handles Groove NAT mode where eth0 already has an IP before wlan1 finishes associating)
+    _deadline=$(( $(date +%s) + WAIT_DHCP_SEC ))
     _cpe_ip=""
     _cpe_gw=""
     _http="000"
-    while [ "$_w" -lt "$WAIT_DHCP_SEC" ]; do
+    while [ "$(date +%s)" -lt "$_deadline" ]; do
         _cpe_ip="$(get_iface_ip "$CPE_IFACE")"
         _cpe_gw="$(get_table_gw "$CPE_TABLE")"
         if [ -n "$_cpe_ip" ] && [ -n "$_cpe_gw" ]; then
@@ -219,7 +237,6 @@ associate_and_verify() {
             fi
         fi
         sleep 1
-        _w=$((_w + 1))
     done
 
     if [ -z "$_cpe_ip" ] || [ -z "$_cpe_gw" ]; then
@@ -256,14 +273,13 @@ associate_and_verify() {
         fi
     fi
 
-    _wv=0
-    while [ "$_wv" -lt "$WAIT_VPN_SEC" ]; do
+    _vpn_deadline=$(( $(date +%s) + WAIT_VPN_SEC ))
+    while [ "$(date +%s)" -lt "$_vpn_deadline" ]; do
         if probe_wg_van "$WG_VAN_IFACE" "$WG_VAN_IP" "$WG_PEER_IP" 150; then
             printf 'vpn_ok\n'
             return 0
         fi
         sleep 2
-        _wv=$((_wv + 2))
     done
 
     printf 'vpn_blocked\n'
@@ -298,13 +314,14 @@ case "$cmd" in
     connect)
         ssid="${2:-}"
         bssid="${3:-}"
+        band="${4:-}"
         if [ -z "$ssid" ]; then
             printf '{"ok":false,"error":"missing ssid"}\n'
             exit 2
         fi
         update_hunter_state "{\"hunting\":true,\"last_action\":\"connecting\"}"
         res_code=0
-        reason="$(associate_and_verify "$ssid" "$bssid")" || res_code=$?
+        reason="$(associate_and_verify "$ssid" "$bssid" "$band")" || res_code=$?
         now="$(date +%s)"
         cd_sec="$(lua "$NET_LUA" get-config "$KNOWN_FILE" cooldown_sec 7200 2>/dev/null || echo 7200)"
         if [ "$res_code" -eq 0 ]; then

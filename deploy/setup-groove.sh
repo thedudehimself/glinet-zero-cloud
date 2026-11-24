@@ -26,6 +26,7 @@ scp -O -q "${TMP_PUB}" "${GROOVE_ADMIN}@${GROOVE_IP}:hunter_van.pub"
 
 ssh "${GROOVE_ADMIN}@${GROOVE_IP}" << 'ROS_EOF'
 /ip service set ftp disabled=yes
+/interface wireless set [find default-name=wlan1] installation=any mode=station wmm-support=enabled wireless-protocol=802.11
 :if ([:len [/user group find name="hunter"]] = 0) do={
   /user group add name=hunter policy=ssh,read,write,test,ftp,!local,!telnet,!reboot,!policy,!winbox,!password,!web,!sniff,!sensitive,!api,!romon
 } else={

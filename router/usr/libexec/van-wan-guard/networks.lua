@@ -242,6 +242,8 @@ local function parse_scan_line(line)
         if csv_split then
             local ssid = csv_body:sub(1, csv_split - 1)
             local tail = csv_body:sub(csv_split + 2)
+            local freq_str = tail:match("^([2567]%d%d%d)")
+            local freq_mhz = freq_str and tonumber(freq_str) or nil
             local rssi_str = tail:match(",(%-%d+),")
             local rssi = rssi_str and tonumber(rssi_str) or nil
             if not rssi or rssi > 0 or rssi < -120 then return nil end
@@ -265,6 +267,8 @@ local function parse_scan_line(line)
                 ssid = ssid,
                 rssi_dbm = rssi,
                 security = sec,
+                freq_mhz = freq_mhz,
+                band = (freq_mhz and freq_mhz >= 4900) and "5g" or "2g",
             }
         end
     end
@@ -282,6 +286,8 @@ local function parse_scan_line(line)
 
     local ssid = rest:sub(1, split_pos - 1):gsub("^%s+", ""):gsub("%s+$", "")
     local tail = rest:sub(split_pos)
+    local freq_str = tail:match("%s+([2567]%d%d%d)")
+    local freq_mhz = freq_str and tonumber(freq_str) or nil
 
     -- First negative integer in tail is signal strength (dBm), before noise floor
     local rssi_str = tail:match("%s+(%-%d+)")
@@ -311,6 +317,8 @@ local function parse_scan_line(line)
         ssid = ssid,
         rssi_dbm = rssi,
         security = sec,
+        freq_mhz = freq_mhz,
+        band = (freq_mhz and freq_mhz >= 4900) and "5g" or "2g",
     }
 end
 
@@ -604,6 +612,8 @@ elseif cmd == "rank-scan" then
                     bssid = row.bssid,
                     rssi_dbm = row.rssi_dbm,
                     security = row.security,
+                    freq_mhz = row.freq_mhz,
+                    band = row.band,
                     tier = tier,
                     priority = priority,
                     trusted = trusted,
@@ -630,20 +640,30 @@ elseif cmd == "ros-connect-cmd" or cmd == "ros-connect-cmd-stdin" then
     local known_path = arg[2] or fail("missing known_path", 2)
     local ssid = nil
     local bssid = ""
+    local band = ""
     if cmd == "ros-connect-cmd-stdin" then
         local body = jsonc.parse(io.stdin:read("*a") or "")
         if type(body) ~= "table" then fail("invalid connect json", 2) end
         ssid = body.ssid
         bssid = (type(body.bssid) == "string") and body.bssid or ""
+        band = (type(body.band) == "string") and body.band or ""
     else
         ssid = arg[3]
         bssid = arg[4] or ""
+        band = arg[5] or ""
     end
     if type(ssid) ~= "string" or #ssid == 0 or #ssid > 32 or has_control_chars(ssid) then
         fail("invalid ssid", 2)
     end
     if #bssid > 0 and not bssid:match("^%x%x:%x%x:%x%x:%x%x:%x%x:%x%x$") then
         fail("invalid bssid", 2)
+    end
+
+    local band_prefix = ""
+    if band == "5g" then
+        band_prefix = ':if ([/interface wireless get [find default-name=wlan1] interface-type] ~ "AR9300") do={ /interface wireless set [find default-name=wlan1] band=5ghz-a/n channel-width=20/40mhz-XX } else={ :do { /interface wireless set [find default-name=wlan1] band=5ghz-a/n/ac channel-width=20/40/80mhz-XXXX } on-error={ /interface wireless set [find default-name=wlan1] band=5ghz-a/n channel-width=20/40mhz-XX } }; '
+    elseif band == "2g" then
+        band_prefix = '/interface wireless set [find default-name=wlan1] band=2ghz-b/g/n channel-width=20/40mhz-XX; '
     end
 
     local known = load_known(known_path)
@@ -655,9 +675,16 @@ elseif cmd == "ros-connect-cmd" or cmd == "ros-connect-cmd-stdin" then
         local esc_ssid = escape_ros_string(ssid)
         local esc_psk = escape_ros_string(net.psk)
         local auth_types = (net.security == "wpa3") and "wpa2-psk,wpa3-psk" or "wpa2-psk"
+        local clist = '/interface wireless connect-list remove [find comment="van-hunter"]; '
+        if #bssid > 0 then
+            clist = clist .. string.format(
+                '/interface wireless connect-list add comment="van-hunter" interface=wlan1 mac-address=%s ssid="%s" security-profile="van-psk" connect=yes; ',
+                bssid:upper(), esc_ssid
+            )
+        end
         io.stdout:write(string.format(
-            '/interface wireless security-profiles set [find name="van-psk"] mode=dynamic-keys authentication-types=%s wpa2-pre-shared-key="%s"; /interface wireless set [find default-name=wlan1] security-profile="van-psk" ssid="%s" bssid="%s"\n',
-            auth_types, esc_psk, esc_ssid, bssid:upper()
+            '%s/interface wireless security-profiles set [find name="van-psk"] mode=dynamic-keys authentication-types=%s wpa2-pre-shared-key="%s"; %s/interface wireless set [find default-name=wlan1] security-profile="van-psk" ssid="%s"\n',
+            band_prefix, auth_types, esc_psk, clist, esc_ssid
         ))
         os.exit(0)
     else
@@ -665,12 +692,39 @@ elseif cmd == "ros-connect-cmd" or cmd == "ros-connect-cmd-stdin" then
             fail("rejected hostile metacharacters in open ssid", 2)
         end
         local esc_ssid = escape_ros_string(ssid)
+        local clist = '/interface wireless connect-list remove [find comment="van-hunter"]; '
+        if #bssid > 0 then
+            clist = clist .. string.format(
+                '/interface wireless connect-list add comment="van-hunter" interface=wlan1 mac-address=%s ssid="%s" security-profile="van-open" connect=yes; ',
+                bssid:upper(), esc_ssid
+            )
+        end
         io.stdout:write(string.format(
-            '/interface wireless set [find default-name=wlan1] security-profile="van-open" ssid="%s" bssid="%s"\n',
-            esc_ssid, bssid:upper()
+            '%s%s/interface wireless set [find default-name=wlan1] security-profile="van-open" ssid="%s"\n',
+            band_prefix, clist, esc_ssid
         ))
         os.exit(0)
     end
+
+elseif cmd == "lookup-band" then
+    local state_path = arg[2] or fail("missing state_path", 2)
+    local target_ssid = arg[3] or ""
+    local target_bssid = (arg[4] or ""):upper()
+    local state = load_state(state_path)
+    local cands = type(state.last_candidates) == "table" and state.last_candidates or {}
+    local found = ""
+    for _, c in ipairs(cands) do
+        if type(c) == "table" and (c.band == "5g" or c.band == "2g") then
+            if #target_bssid > 0 and type(c.bssid) == "string" and c.bssid:upper() == target_bssid then
+                found = c.band
+                break
+            elseif found == "" and c.ssid == target_ssid then
+                found = c.band
+            end
+        end
+    end
+    io.stdout:write(found .. "\n")
+    os.exit(0)
 
 elseif cmd == "cooldown" then
     local state_path = arg[2] or fail("missing state_path", 2)

@@ -167,17 +167,29 @@ for _, c in ipairs(ranked) do
 end
 assert_eq(saw_2026, true, "SSID with 4-digit year 'Campground 2026' must not be truncated")
 
--- 5. RouterOS connect command generation & escaping
-local ok_cmd1, cmd1 = run_cmd("lua " .. script .. " ros-connect-cmd " .. known .. ' "HomeWiFi" "AA:AA:AA:AA:AA:01"')
+-- 5. RouterOS connect command generation & escaping (including RouterOS v6 connect-list BSSID pinning & 5G band switching)
+local ok_cmd1, cmd1 = run_cmd("lua " .. script .. " ros-connect-cmd " .. known .. ' "HomeWiFi" "AA:AA:AA:AA:AA:01" "5g"')
 assert_eq(ok_cmd1, true, "ros-connect-cmd wpa2 failed: " .. cmd1)
+assert(cmd1:find('AR9300', 1, true) ~= nil and cmd1:find('band=5ghz-a/n/ac', 1, true) ~= nil, "5g must guard AR9300 and include 5ghz band switch: " .. cmd1)
 assert(cmd1:find('security-profile="van-psk"', 1, true) ~= nil, "must select van-psk: " .. cmd1)
 assert(cmd1:find('Sup3r\\$ecret\\"\\[\\\\]', 1, true) ~= nil, "must escape $, \", [, \\ in PSK: " .. cmd1)
-assert(cmd1:find('bssid="AA:AA:AA:AA:AA:01"', 1, true) ~= nil, "must set bssid: " .. cmd1)
+assert(cmd1:find('mac-address=AA:AA:AA:AA:AA:01', 1, true) ~= nil, "must pin bssid via connect-list: " .. cmd1)
+
+-- Verify lookup-band resolves both 5g and 2g candidates from hunter_state.json
+local ok_us, _ = run_cmd("lua " .. script .. " update-state " .. state, jsonc.stringify({ last_candidates = ranked }))
+assert_eq(ok_us, true, "update-state last_candidates failed")
+local ok_lb1, lb1 = run_cmd("lua " .. script .. " lookup-band " .. state .. ' "xfinitywifi" "DD:DD:DD:DD:DD:01"')
+assert_eq(ok_lb1, true, "lookup-band 5g failed")
+assert_eq(lb1:gsub("%s+", ""), "5g", "expected 5g band for xfinitywifi")
+local ok_lb2, lb2 = run_cmd("lua " .. script .. " lookup-band " .. state .. ' "HomeWiFi" "AA:AA:AA:AA:AA:01"')
+assert_eq(ok_lb2, true, "lookup-band 2g failed")
+assert_eq(lb2:gsub("%s+", ""), "2g", "expected 2g band for HomeWiFi")
 
 local ok_cmd2, cmd2 = run_cmd("lua " .. script .. " ros-connect-cmd " .. known .. ' "xfinitywifi"')
 assert_eq(ok_cmd2, true, "ros-connect-cmd open failed: " .. cmd2)
 assert(cmd2:find('security-profile="van-open"', 1, true) ~= nil, "must select van-open: " .. cmd2)
-assert(cmd2:find('bssid=""', 1, true) ~= nil, "must clear bssid when omitted: " .. cmd2)
+assert(cmd2:find('connect-list remove', 1, true) ~= nil, "must clear van-hunter connect-list: " .. cmd2)
+assert(cmd2:find('mac-address=', 1, true) == nil, "must not pin mac-address when bssid omitted: " .. cmd2)
 
 local ok_cmd_bad, _ = run_cmd("lua " .. script .. " ros-connect-cmd " .. known .. ' "Bad[/system reboot]"')
 assert_eq(ok_cmd_bad, false, "ros-connect-cmd must reject hostile open SSID")
