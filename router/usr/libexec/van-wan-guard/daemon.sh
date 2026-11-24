@@ -109,7 +109,7 @@ ensure_policy_rule() {
     _tbl="$2"
     [ "$DRY_RUN" = "1" ] && return 0
     [ -z "$_ip" ] && return 0
-    if ! ip rule show 2>/dev/null | grep -q "from ${_ip} lookup ${_tbl}"; then
+    if ! ip rule show 2>/dev/null | grep -q "^${_tbl}:.*from ${_ip} lookup ${_tbl}"; then
         ip rule del prio "$_tbl" 2>/dev/null || true
         ip rule add from "${_ip}/32" table "$_tbl" prio "$_tbl" 2>/dev/null || true
     fi
@@ -398,7 +398,7 @@ run_tick() {
                 buf = buf " " line
             }
             END {
-                gsub(/["\[\],]/, " ", buf)
+                gsub(/"|\[|\]|,/, " ", buf)
                 gsub(/[[:space:]]+/, " ", buf)
                 sub(/^ /, "", buf)
                 sub(/ $/, "", buf)

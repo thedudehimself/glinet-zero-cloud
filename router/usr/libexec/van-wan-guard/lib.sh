@@ -33,7 +33,12 @@ json_get_val() {
                 if (substr(rest, 1, 1) == "\"") {
                     rest = substr(rest, 2)
                     i = index(rest, "\"")
-                    if (i > 0) { print substr(rest, 1, i - 1); exit }
+                    if (i > 0) {
+                        val = substr(rest, 1, i - 1)
+                        gsub(/\\\//, "/", val)
+                        print val
+                        exit
+                    }
                 } else {
                     gsub(/[,}[:space:]].*$/, "", rest)
                     print rest

@@ -159,7 +159,7 @@ done
 
 uci set network.wan.device='eth0'
 uci set network.wan.proto='dhcp'
-uci set network.wan.defaultroute='0'
+uci set network.wan.defaultroute='1'
 uci set network.wan.peerdns='0'
 uci set network.wan.ipv6='0'
 uci set network.wan.ip4table='101'
@@ -169,7 +169,7 @@ uci -q delete network.wan.metric || true
 uci set network.wan2=interface
 uci set network.wan2.device='eth1'
 uci set network.wan2.proto='dhcp'
-uci set network.wan2.defaultroute='0'
+uci set network.wan2.defaultroute='1'
 uci set network.wan2.peerdns='0'
 uci set network.wan2.ipv6='0'
 uci set network.wan2.ip4table='102'
@@ -238,6 +238,8 @@ fi
 
 uci -q set network.wgclient.disabled='1' || true
 uci -q set network.wgclient1.disabled='1' || true
+uci -q set wireguard.global.global_proxy='0' || true
+uci -q commit wireguard || true
 for rsec in $(uci show network | awk -F. '/\.gl_vpn_rules=/ {print $2}'); do
     uci -q set "network.${rsec}.disabled=1" || true
 done

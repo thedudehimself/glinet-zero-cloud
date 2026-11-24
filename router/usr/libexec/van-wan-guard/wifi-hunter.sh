@@ -20,7 +20,7 @@ LOCK_DIR="${STATE_DIR}/hunter.lock"
 
 GROOVE_IP="$(json_get_val "$CFG" "groove_ip" "192.168.88.1")"
 GROOVE_USER="$(json_get_val "$CFG" "groove_user" "hunter")"
-GROOVE_KEY="${CONF_DIR}/groove_dropbear.key"
+GROOVE_KEY="$(json_get_val "$CFG" "groove_key" "${CONF_DIR}/groove_dropbear.key")"
 CPE_IFACE="$(json_get_val "$CFG" "cpe_iface" "eth0")"
 CPE_TABLE="$(json_get_val "$CFG" "cpe_table" "101")"
 CAPTIVE_URL="$(json_get_val "$CFG" "captive_url" "http://connectivitycheck.gstatic.com/generate_204")"
@@ -84,7 +84,11 @@ run_groove_ssh() {
     _rcmd="$1"
     _tmo="${2:-12}"
     [ -f "$GROOVE_KEY" ] || return 1
-    timeout "$_tmo" dbclient -y -i "$GROOVE_KEY" "${GROOVE_USER}@${GROOVE_IP}" "$_rcmd" </dev/null 2>/dev/null
+    if [ -x /usr/libexec/ssh-openssh ] && [ -x "${SCRIPT_DIR}/groove-ssh.sh" ]; then
+        timeout "$_tmo" "${SCRIPT_DIR}/groove-ssh.sh" -i "$GROOVE_KEY" "${GROOVE_USER}@${GROOVE_IP}" "$_rcmd" </dev/null 2>/dev/null
+    else
+        timeout "$_tmo" dbclient -y -i "$GROOVE_KEY" "${GROOVE_USER}@${GROOVE_IP}" "$_rcmd" </dev/null 2>/dev/null
+    fi
 }
 
 # Upload PSK connect command via 0600 temp .rsc + scp so plaintext PSK NEVER appears in dbclient argv.
@@ -117,8 +121,13 @@ run_groove_connect_cmd() {
 }
 
 scan_groove_raw() {
-    _out="$(run_groove_ssh '/interface wireless scan wlan1 duration=5 background=no' 14 || true)"
-    if [ -z "$_out" ]; then
+    # RouterOS v6: save-file CSV yields full 32-char SSIDs + explicit privacy flag without dropping active Wi-Fi
+    run_groove_ssh '/interface wireless scan wlan1 duration=4 background=yes save-file=van_scan.txt' 14 >/dev/null || true
+    _out="$(run_groove_ssh ':put [/file get van_scan.txt contents]; /file remove [find name="van_scan.txt"]' 10 || true)"
+    if ! printf '%s\n' "$_out" | grep -qE '[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}'; then
+        _out="$(run_groove_ssh '/interface wireless scan wlan1 duration=5 background=no' 14 || true)"
+    fi
+    if ! printf '%s\n' "$_out" | grep -qE '[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}'; then
         _out="$(run_groove_ssh '/interface wifi scan wifi1 duration=5' 14 || true)"
     fi
     printf '%s\n' "$_out"
@@ -135,7 +144,7 @@ get_table_gw() {
 ensure_cpe_policy_rule() {
     _ip="$1"
     [ -z "$_ip" ] && return 0
-    if ! ip rule show 2>/dev/null | grep -q "from ${_ip} lookup ${CPE_TABLE}"; then
+    if ! ip rule show 2>/dev/null | grep -q "^${CPE_TABLE}:.*from ${_ip} lookup ${CPE_TABLE}"; then
         ip rule del prio "$CPE_TABLE" 2>/dev/null || true
         ip rule add from "${_ip}/32" table "$CPE_TABLE" prio "$CPE_TABLE" 2>/dev/null || true
     fi

@@ -100,6 +100,11 @@ local scan_sample = table.concat({
     "AB 11:22:33:44:55:04 Campground 2026           2437/20        -63  -100  37  none",
     "AB 11:22:33:44:55:05 HomeWiFi 2412/20 -30 wpa2 2462/20        -67  -100  33  none",
     "AB 11:22:33:44:55:06 HomeWiFi 2412/x -30 wpa2  5180           -68  -100  32  none",
+    "AP 11:22:33:44:55:07 UnknownPFlagNet           2437/20        -55  -108  53",
+    "11:22:33:44:55:08,'Campground WPA',2437/20/gn(24dBm),-58,802.11,privacy,",
+    "11:22:33:44:55:09,'HomeWiFi',2437/20/gn(24dBm),-46,802.11,,",
+    "11:22:33:44:55:0A,'HomeWiFi',2412/20,-30,802.11,privacy,2462/20,-66,802.11,,",
+    "11:22:33:44:55:0B,'CSV Open Cafe',2462/20/gn(24dBm),-61,802.11,,",
 }, "\n")
 
 local ok_rank, out_rank = run_cmd("lua " .. script .. " rank-scan " .. known .. " " .. state .. " " .. tostring(now), scan_sample)
@@ -140,6 +145,21 @@ for _, c in ipairs(ranked) do
         assert_eq(c.security, "open", "crafted non-slash SSID must not spoof wpa2 security")
         assert_eq(c.rssi_dbm, -68, "crafted non-slash SSID must not spoof RSSI -30")
         assert_eq(c.trusted, false, "crafted non-slash SSID must NEVER be trusted")
+    end
+    assert(c.bssid ~= "11:22:33:44:55:07", "RouterOS v6 P-flag unknown WPA2 network must NOT be treated as open")
+    assert(c.bssid ~= "11:22:33:44:55:09", "CSV open evil twin of saved WPA2 HomeWiFi must be excluded")
+    if c.bssid == "11:22:33:44:55:08" then
+        assert_eq(c.ssid, "Campground WPA", "CSV save-file row must parse exact SSID")
+        assert_eq(c.security, "wpa2", "CSV privacy flag must classify as wpa2")
+        assert_eq(c.rssi_dbm, -58, "CSV RSSI must parse cleanly")
+    end
+    if c.bssid == "11:22:33:44:55:0A" then
+        assert_eq(c.security, "open", "crafted CSV SSID must not spoof privacy")
+        assert_eq(c.trusted, false, "crafted CSV SSID must NEVER be trusted")
+    end
+    if c.bssid == "11:22:33:44:55:0B" then
+        assert_eq(c.ssid, "CSV Open Cafe", "CSV open network must parse exact SSID")
+        assert_eq(c.security, "open", "CSV row without privacy must classify as open")
     end
     if c.ssid == "Campground 2026" then saw_2026 = true end
 end

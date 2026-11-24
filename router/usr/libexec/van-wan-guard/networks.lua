@@ -214,18 +214,20 @@ local function redact_known(known)
 end
 
 local function parse_scan_line(line)
-    -- Matches RouterOS v6 (/interface wireless scan) and v7 (/interface wifi scan) rows.
+    -- Matches RouterOS v6 save-file CSV (MAC,'SSID',freq,rssi,proto,flags,), v6 table, and v7 (/interface wifi scan).
     -- SECURITY: Anchor split to the RIGHTMOST RouterOS frequency+RSSI boundary so a crafted
-    -- 32-byte SSID like "HomeWiFi 2412/20 -30 wpa2" can NEVER spoof SSID, RSSI, or security!
-    local _, mac_e, mac = line:find("(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)")
+    -- 32-byte SSID can NEVER spoof SSID, RSSI, or security!
+    line = line:gsub("\r", "")
+    local mac_s, mac_e, mac = line:find("(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)")
     if not mac then return nil end
+    local prefix = line:sub(1, mac_s - 1)
     local rest = line:sub(mac_e + 1)
 
     local function find_last_match(str, pat)
         local last_s = nil
         local pos = 1
         while true do
-            local s, e = str:find(pat, pos)
+            local s, _ = str:find(pat, pos)
             if not s then break end
             last_s = s
             pos = s + 1
@@ -233,6 +235,41 @@ local function parse_scan_line(line)
         return last_s
     end
 
+    -- Format 1: RouterOS save-file CSV: ,'<SSID>',2437/20/gn(24dBm),-60,802.11,privacy,
+    if rest:sub(1, 2) == ",'" then
+        local csv_body = rest:sub(3)
+        local csv_split = find_last_match(csv_body, "',[2567]%d%d%d[^,]*,%-%d+,")
+        if csv_split then
+            local ssid = csv_body:sub(1, csv_split - 1)
+            local tail = csv_body:sub(csv_split + 2)
+            local rssi_str = tail:match(",(%-%d+),")
+            local rssi = rssi_str and tonumber(rssi_str) or nil
+            if not rssi or rssi > 0 or rssi < -120 then return nil end
+            local low_tail = tail:lower()
+            local sec = "open"
+            if low_tail:find("privacy", 1, true)
+                or low_tail:find("wpa", 1, true)
+                or low_tail:find("rsn", 1, true)
+                or low_tail:find("aes", 1, true)
+                or low_tail:find("tkip", 1, true)
+                or low_tail:find("sae", 1, true)
+                or low_tail:find("dot1x", 1, true)
+                or low_tail:find("eap", 1, true)
+                or low_tail:find("wep", 1, true)
+                or low_tail:find("owe", 1, true)
+            then
+                sec = "wpa2"
+            end
+            return {
+                bssid = mac:upper(),
+                ssid = ssid,
+                rssi_dbm = rssi,
+                security = sec,
+            }
+        end
+    end
+
+    -- Format 2: Space-delimited RouterOS v6/v7 scan table
     local p1 = find_last_match(rest, "%s+[2567]%d%d%d/[^%s]*%s+%-%d+")
     local p2 = find_last_match(rest, "%s+[2567]%d%d%d%s+%-%d+")
     local split_pos = nil
@@ -254,7 +291,8 @@ local function parse_scan_line(line)
 
     local low_tail = tail:lower()
     local sec = "open"
-    if low_tail:find("wpa", 1, true)
+    if prefix:find("P", 1, true)
+        or low_tail:find("wpa", 1, true)
         or low_tail:find("rsn", 1, true)
         or low_tail:find("aes", 1, true)
         or low_tail:find("tkip", 1, true)

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Non-blocking MikroTik GrooveA-52 RouterOS telemetry poller (Dropbear dbclient).
+# Non-blocking MikroTik CPE RouterOS telemetry poller (OpenSSH or Dropbear).
 set -eu
 
 CONF_DIR="${VAN_CONF_DIR:-/etc/van-wan-guard}"
@@ -10,7 +10,7 @@ SCRIPT_DIR="$(dirname "$0")"
 
 CFG="${CONF_DIR}/config.json"
 GROOVE_IP="$(json_get_val "$CFG" "groove_ip" "192.168.88.1")"
-GROOVE_USER="$(json_get_val "$CFG" "groove_user" "portal")"
+GROOVE_USER="$(json_get_val "$CFG" "groove_user" "hunter")"
 GROOVE_KEY="$(json_get_val "$CFG" "groove_key" "/etc/van-wan-guard/groove_dropbear.key")"
 
 ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -21,14 +21,22 @@ if [ ! -f "$GROOVE_KEY" ]; then
 fi
 
 export HOME="${HOME:-/root}"
-SSH_BIN="dbclient"
-command -v dbclient >/dev/null 2>&1 || SSH_BIN="ssh"
 
 run_ros_cmd() {
-    if command -v timeout >/dev/null 2>&1; then
-        timeout 3 "$SSH_BIN" -y -i "$GROOVE_KEY" "${GROOVE_USER}@${GROOVE_IP}" "$1" </dev/null 2>/dev/null || true
+    if [ -x /usr/libexec/ssh-openssh ] && [ -x "${SCRIPT_DIR}/groove-ssh.sh" ]; then
+        if command -v timeout >/dev/null 2>&1; then
+            timeout 5 "${SCRIPT_DIR}/groove-ssh.sh" -i "$GROOVE_KEY" "${GROOVE_USER}@${GROOVE_IP}" "$1" </dev/null 2>/dev/null || true
+        else
+            "${SCRIPT_DIR}/groove-ssh.sh" -i "$GROOVE_KEY" "${GROOVE_USER}@${GROOVE_IP}" "$1" </dev/null 2>/dev/null || true
+        fi
     else
-        "$SSH_BIN" -y -i "$GROOVE_KEY" "${GROOVE_USER}@${GROOVE_IP}" "$1" </dev/null 2>/dev/null || true
+        SSH_BIN="dbclient"
+        command -v dbclient >/dev/null 2>&1 || SSH_BIN="ssh"
+        if command -v timeout >/dev/null 2>&1; then
+            timeout 3 "$SSH_BIN" -y -i "$GROOVE_KEY" "${GROOVE_USER}@${GROOVE_IP}" "$1" </dev/null 2>/dev/null || true
+        else
+            "$SSH_BIN" -y -i "$GROOVE_KEY" "${GROOVE_USER}@${GROOVE_IP}" "$1" </dev/null 2>/dev/null || true
+        fi
     fi
 }
 

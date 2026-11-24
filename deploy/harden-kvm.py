@@ -133,8 +133,8 @@ def _flash_edid_http(base_url: str, username: str, password: str, edid_hex: str)
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Harden GL.iNet KVM USB/HDMI descriptors")
-    parser.add_argument("--ssh-host", required=True, help="e.g. root@192.168.20.130")
-    parser.add_argument("--url", required=True, help="e.g. https://192.168.20.130")
+    parser.add_argument("--ssh-host", required=True, help="e.g. root@10.10.20.15")
+    parser.add_argument("--url", required=True, help="e.g. https://10.10.20.15")
     parser.add_argument("--preset", choices=sorted(USB_PRESETS), default="logitech-receiver")
     parser.add_argument("--monitor-name", default="DELL U2723QE", help="1-12 ASCII chars")
     parser.add_argument("--edid-key", default="E2560x1440", help="Profile key in /etc/kvmd/edid.json")

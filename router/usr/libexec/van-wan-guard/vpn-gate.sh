@@ -126,7 +126,7 @@ ensure_wg_routes() {
 
 # Discover local LAN/guest subnets dynamically (falls back to GL.iNet defaults 192.168.8.0/24 & 192.168.9.0/24).
 _list_local_lan_cidrs() {
-    _cidrs="$(ip -4 route show proto kernel scope link 2>/dev/null | awk '$3 ~ /^br-/ && $1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\/[0-9]+$/ { print $1 }')"
+    _cidrs="$(ip -4 route show scope link 2>/dev/null | awk '$3 ~ /^br-/ && $1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\/[0-9]+$/ { print $1 }')"
     if [ -n "$_cidrs" ]; then
         printf '%s\n' "$_cidrs"
     else

@@ -11,24 +11,25 @@ echo "[1/4] Inspecting GrooveA-52 (${GROOVE_ADMIN}@${GROOVE_IP})..."
 ROS_VER="$(ssh -o ConnectTimeout=5 "${GROOVE_ADMIN}@${GROOVE_IP}" "/system resource print" 2>/dev/null | awk -F: '/version:/ { gsub(/^[[:space:]]+/, "", $2); print $2; exit }' || true)"
 echo "  RouterOS version: ${ROS_VER:-unknown}"
 
-echo "[2/4] Fetching GL-MT3000 Dropbear public key..."
-PUB_KEY="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "${MT_HOST}" 'dropbearkey -y -f /etc/van-wan-guard/groove_dropbear.key | grep "^ssh-"')"
+echo "[2/4] Fetching router SSH public key (prefers OpenSSH RSA key for RouterOS v6 compat, else Dropbear)..."
+PUB_KEY="$(ssh -o BatchMode=yes -o ConnectTimeout=5 -o IPQoS=none "${MT_HOST}" 'if [ -f /etc/van-wan-guard/groove_rsa.key.pub ]; then cat /etc/van-wan-guard/groove_rsa.key.pub; else dropbearkey -y -f /etc/van-wan-guard/groove_dropbear.key | grep "^ssh-"; fi')"
 echo "  Public key: ${PUB_KEY}"
 if [[ "${ROS_VER}" == 6.* ]] && [[ "${PUB_KEY}" == ssh-ed25519* ]]; then
-    echo "  NOTE: RouterOS v6 detected; if Ed25519 SSH import fails, re-run setup-mt3000.sh with --groove-key-type rsa." >&2
+    echo "  NOTE: RouterOS v6 detected; install openssh-client + RSA key (/etc/van-wan-guard/groove_rsa.key) on GL.iNet 4.11+ for KEX/RSA compatibility." >&2
 fi
 
-echo "[3/4] Creating least-privilege RouterOS 'hunter' group (ssh,read,write ONLY - NO policy/ftp/winbox/reboot) & dual profiles..."
+echo "[3/4] Creating least-privilege RouterOS 'hunter' group (ssh,read,write,test,ftp for SCP with FTP service disabled) & dual profiles..."
 TMP_PUB="$(mktemp)"
 trap 'rm -f "${TMP_PUB}"' EXIT
 printf '%s\n' "${PUB_KEY}" > "${TMP_PUB}"
-scp -q "${TMP_PUB}" "${GROOVE_ADMIN}@${GROOVE_IP}:hunter_van.pub"
+scp -O -q "${TMP_PUB}" "${GROOVE_ADMIN}@${GROOVE_IP}:hunter_van.pub"
 
 ssh "${GROOVE_ADMIN}@${GROOVE_IP}" << 'ROS_EOF'
+/ip service set ftp disabled=yes
 :if ([:len [/user group find name="hunter"]] = 0) do={
-  /user group add name=hunter policy=ssh,read,write,!local,!telnet,!ftp,!reboot,!policy,!test,!winbox,!password,!web,!sniff,!sensitive,!api,!romon
+  /user group add name=hunter policy=ssh,read,write,test,ftp,!local,!telnet,!reboot,!policy,!winbox,!password,!web,!sniff,!sensitive,!api,!romon
 } else={
-  /user group set [find name="hunter"] policy=ssh,read,write,!local,!telnet,!ftp,!reboot,!policy,!test,!winbox,!password,!web,!sniff,!sensitive,!api,!romon
+  /user group set [find name="hunter"] policy=ssh,read,write,test,ftp,!local,!telnet,!reboot,!policy,!winbox,!password,!web,!sniff,!sensitive,!api,!romon
 }
 :if ([:len [/user find name="hunter"]] = 0) do={
   /user add name=hunter group=hunter disabled=no
