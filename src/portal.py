@@ -137,6 +137,7 @@ class PortalApp:
         self._ssh_lock = threading.Lock()
         self._sweep_locks: dict[str, threading.Lock] = {d["id"]: threading.Lock() for d in self.devices}
         self._hunt_locks: dict[str, threading.Lock] = {d["id"]: threading.Lock() for d in self.devices}
+        self._last_van_status: dict[str, dict] = {}
         self._stop_event = threading.Event()
         self._nginx_sync_status: dict = {"changed": False, "reloaded": False, "error": None}
 
@@ -493,9 +494,25 @@ class PortalApp:
         dev = self.devices_by_id.get(device_id)
         if not dev or dev.get("role") != "van_router":
             return 404, {"error": "Van router not configured"}
+        # During a dual-band Groove scan/connect, wlan1 briefly switches bands and interrupts wg_mgmt.
+        # Serve the last cached snapshot with hunting=True instead of throwing HTTP 502 at the UI poller.
+        hunt_lock = self._hunt_locks.get(device_id)
+        if hunt_lock is not None and hunt_lock.locked():
+            with self._state_lock:
+                cached = self._last_van_status.get(device_id)
+            if isinstance(cached, dict):
+                snap = dict(cached)
+                hunter = dict(snap.get("hunter") or {})
+                hunter["hunting"] = True
+                hunter["last_action"] = "scanning"
+                snap["hunter"] = hunter
+                snap["stale"] = True
+                return 200, snap
         ip = self._device_ip(device_id, dev)
         res = self._van_status_fn(ip, dev.get("ssh_user", "root"), self.ssh_key)
         if res.get("ok"):
+            with self._state_lock:
+                self._last_van_status[device_id] = dict(res)
             return 200, res
         return 502, {"ok": False, "error": res.get("error") or "Failed to fetch van-wan status"}
 

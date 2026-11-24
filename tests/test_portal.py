@@ -647,5 +647,53 @@ def test_van_ui_and_cgi_bridge_routes_require_tailscale_auth_and_csrf(tmp_path: 
         srv.server_close()
 
 
+def test_van_status_returns_cached_snapshot_during_hunt_scan(tmp_path):
+    cfg = tmp_path / "devices.json"
+    cfg.write_text(
+        json.dumps(
+            {
+                "tailscale_host": "gateway.tailnet-example.ts.net",
+                "portal_port": 8440,
+                "allowed_tailscale_users": ["alice@example.com"],
+                "devices": [
+                    {
+                        "id": "mt3000",
+                        "name": "GL-MT3000",
+                        "role": "van_router",
+                        "model": "GL-MT3000",
+                        "mac": "94:83:c4:00:00:03",
+                        "preferred_vlan": "br10",
+                        "fallback_ip": "192.168.2.5",
+                        "ssh_enabled": True,
+                    }
+                ],
+            }
+        )
+    )
+    calls = {"n": 0}
+
+    def fake_status(*_args):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"ok": True, "mode": "auto", "active_wan": "cpe", "hunter": {"hunting": False}}
+        return {"ok": False, "error": "SSH timed out during band switch"}
+
+    app = PortalApp(cfg, StateStore(tmp_path / "s.db"), enable_system_io=False, van_status_fn=fake_status)
+    code1, data1 = app.get_van_status_live("mt3000")
+    assert code1 == 200 and data1["mode"] == "auto"
+
+    # Simulate an active dual-band Groove scan holding the hunt lock
+    assert app._hunt_locks["mt3000"].acquire(blocking=False)
+    try:
+        code2, data2 = app.get_van_status_live("mt3000")
+        assert code2 == 200
+        assert data2["stale"] is True
+        assert data2["hunter"]["hunting"] is True
+        assert calls["n"] == 1  # Served from cache without burning a doomed SSH timeout
+    finally:
+        app._hunt_locks["mt3000"].release()
+
+
+
 
 

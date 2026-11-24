@@ -113,6 +113,7 @@
     const CGI = "/cgi-bin/van-wan";
     let autoHuntState = true;
     let manualScanActive = false;
+    let actionInFlight = false;
     const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 
     async function postAction(payload) {
@@ -195,10 +196,15 @@
     }
 
     async function load() {
+      if (actionInFlight) return;
       try {
         const r = await fetch(CGI, { cache: "no-store" });
         if (!r.ok) throw new Error("HTTP " + r.status);
         const d = await r.json();
+        const msgEl = document.getElementById("msg");
+        if (msgEl && msgEl.textContent.startsWith("Status error:")) {
+          msgEl.textContent = "";
+        }
         document.getElementById("updated").textContent = "Mode: " + (d.mode || "?") + " • " + (d.updated_at || "");
         const ap = document.getElementById("active-pill");
         ap.textContent = d.active_wan === "cpe" ? "GROOVE CPE" : d.active_wan === "starlink" ? "STARLINK" : "OFFLINE";
@@ -234,7 +240,9 @@
           renderCandidates(h.last_candidates);
         }
       } catch (e) {
-        document.getElementById("msg").textContent = "Status error: " + e.message;
+        if (!actionInFlight) {
+          document.getElementById("msg").textContent = "Status error: " + e.message;
+        }
       }
     }
 
@@ -261,7 +269,8 @@
     document.getElementById("scan-btn").addEventListener("click", async (ev) => {
       const btn = ev.currentTarget;
       btn.disabled = true;
-      document.getElementById("msg").textContent = "Scanning nearby Wi-Fi via GrooveA-52...";
+      actionInFlight = true;
+      document.getElementById("msg").textContent = "Scanning 2.4 & 5 GHz via Groove CPE (10-15s)...";
       try {
         const d = await postAction({ action: "hunt-scan" });
         manualScanActive = true;
@@ -269,13 +278,18 @@
         document.getElementById("msg").textContent = `Found ${(d.candidates || []).length} candidate AP(s).`;
       } catch (e) {
         document.getElementById("msg").textContent = "Scan error: " + e.message;
-      } finally { btn.disabled = false; }
+      } finally {
+        actionInFlight = false;
+        btn.disabled = false;
+        setTimeout(load, 800);
+      }
     });
 
     document.getElementById("scan-list").addEventListener("click", async (ev) => {
       const btn = ev.target.closest("button[data-connect-ssid]");
       if (!btn) return;
       btn.disabled = true;
+      actionInFlight = true;
       const ssid = btn.dataset.connectSsid;
       const bssid = btn.dataset.connectBssid;
       const band = btn.dataset.connectBand;
@@ -285,10 +299,13 @@
         document.getElementById("msg").textContent = d.captive_required
           ? `Connected to ${ssid} - captive portal detected. Tap Captive Login (10m).`
           : `Connected to ${ssid} (${d.result || "ok"})`;
-        setTimeout(load, 1000);
       } catch (e) {
         document.getElementById("msg").textContent = "Connect failed: " + e.message;
-      } finally { btn.disabled = false; }
+      } finally {
+        actionInFlight = false;
+        btn.disabled = false;
+        setTimeout(load, 1000);
+      }
     });
 
     document.getElementById("net-sec").addEventListener("change", (ev) => {
