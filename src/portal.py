@@ -138,6 +138,7 @@ class PortalApp:
         self._sweep_locks: dict[str, threading.Lock] = {d["id"]: threading.Lock() for d in self.devices}
         self._hunt_locks: dict[str, threading.Lock] = {d["id"]: threading.Lock() for d in self.devices}
         self._last_van_status: dict[str, dict] = {}
+        self._last_van_networks: dict[str, dict] = {}
         self._stop_event = threading.Event()
         self._nginx_sync_status: dict = {"changed": False, "reloaded": False, "error": None}
 
@@ -461,6 +462,12 @@ class PortalApp:
         dev, code, err = self._require_van_router(device_id)
         if not dev:
             return code, err or {"error": "invalid device"}
+        hunt_lock = self._hunt_locks.get(device_id)
+        if hunt_lock is not None and hunt_lock.locked():
+            with self._state_lock:
+                cached = self._last_van_networks.get(device_id)
+            if isinstance(cached, dict):
+                return 200, dict(cached)
         ip = self._device_ip(device_id, dev)
         res = self._list_networks_fn(ip, dev.get("ssh_user", "root"), self.ssh_key)
         if res.get("ok"):
@@ -469,6 +476,8 @@ class PortalApp:
                 for n in res["networks"]:
                     if isinstance(n, dict):
                         n.pop("psk", None)
+            with self._state_lock:
+                self._last_van_networks[device_id] = dict(res)
             return 200, res
         return 502, {"ok": False, "error": res.get("error") or "Failed to load known networks"}
 
@@ -634,22 +643,28 @@ def create_server(app: PortalApp, host: str = "127.0.0.1", port: int = 8450) -> 
 
         def _send_json(self, code: int, payload: dict, head_only: bool = False) -> None:
             body = json.dumps(payload).encode("utf-8")
-            self.send_response(code)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            if not head_only:
-                self.wfile.write(body)
+            try:
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                if not head_only:
+                    self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
         def _send_html(self, html_bytes: bytes, head_only: bool = False) -> None:
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-            self.send_header("Content-Length", str(len(html_bytes)))
-            self.end_headers()
-            if not head_only:
-                self.wfile.write(html_bytes)
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+                self.send_header("Content-Length", str(len(html_bytes)))
+                self.end_headers()
+                if not head_only:
+                    self.wfile.write(html_bytes)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
         def _check_auth(self, method: str) -> bool:
             ok, code, msg = app.is_authorized(self.headers, method, self.path)

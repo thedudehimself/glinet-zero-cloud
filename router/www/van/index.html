@@ -81,6 +81,7 @@
         </div>
       </div>
       <div class="sub" id="hunter-sub" style="margin-top:6px;">Idle</div>
+      <div id="hunter-msg" class="sub" style="margin-top:6px;min-height:1.1em;color:var(--a);"></div>
       <div class="list" id="scan-list"></div>
     </div>
 
@@ -235,14 +236,32 @@
         ].map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
 
         const h = d.hunter || {};
-        document.getElementById("hunter-sub").textContent = h.hunting ? "Hunting nearby Wi-Fi..." : ("Last: " + (h.last_action || "idle"));
+        const busy = Boolean(h.hunting);
+        document.getElementById("hunter-sub").textContent = busy ? "Hunting nearby Wi-Fi (please wait)..." : ("Last: " + (h.last_action || "idle"));
+        const scanBtn = document.getElementById("scan-btn");
+        if (scanBtn && !actionInFlight) {
+          scanBtn.disabled = busy;
+          scanBtn.textContent = busy ? "Scanning..." : "Scan Nearby Wi-Fi";
+        }
         if (!manualScanActive && Array.isArray(h.last_candidates) && h.last_candidates.length > 0) {
           renderCandidates(h.last_candidates);
         }
+        document.querySelectorAll("#scan-list button[data-connect-ssid]").forEach((b) => {
+          if (!actionInFlight) b.disabled = busy;
+        });
       } catch (e) {
         if (!actionInFlight) {
           document.getElementById("msg").textContent = "Status error: " + e.message;
         }
+      }
+    }
+
+    function setHunterMsg(text, isErr) {
+      document.getElementById("msg").textContent = text;
+      const hm = document.getElementById("hunter-msg");
+      if (hm) {
+        hm.textContent = text;
+        hm.style.color = isErr ? "var(--r)" : "var(--a)";
       }
     }
 
@@ -269,41 +288,48 @@
     document.getElementById("scan-btn").addEventListener("click", async (ev) => {
       const btn = ev.currentTarget;
       btn.disabled = true;
+      btn.textContent = "Scanning...";
       actionInFlight = true;
-      document.getElementById("msg").textContent = "Scanning 2.4 & 5 GHz via Groove CPE (10-15s)...";
+      document.querySelectorAll("#scan-list button[data-connect-ssid]").forEach((b) => { b.disabled = true; });
+      setHunterMsg("Scanning 2.4 & 5 GHz via Groove CPE (10-15s)...", false);
       try {
         const d = await postAction({ action: "hunt-scan" });
         manualScanActive = true;
         renderCandidates(d.candidates || []);
-        document.getElementById("msg").textContent = `Found ${(d.candidates || []).length} candidate AP(s).`;
+        setHunterMsg(`Found ${(d.candidates || []).length} candidate AP(s).`, false);
       } catch (e) {
-        document.getElementById("msg").textContent = "Scan error: " + e.message;
+        setHunterMsg("Scan error: " + e.message, true);
       } finally {
         actionInFlight = false;
         btn.disabled = false;
+        btn.textContent = "Scan Nearby Wi-Fi";
+        document.querySelectorAll("#scan-list button[data-connect-ssid]").forEach((b) => { b.disabled = false; });
         setTimeout(load, 800);
       }
     });
 
     document.getElementById("scan-list").addEventListener("click", async (ev) => {
       const btn = ev.target.closest("button[data-connect-ssid]");
-      if (!btn) return;
-      btn.disabled = true;
+      if (!btn || actionInFlight) return;
       actionInFlight = true;
+      const origText = btn.textContent;
+      btn.textContent = "Connecting...";
+      document.querySelectorAll("#scan-list button[data-connect-ssid], #scan-btn").forEach((b) => { b.disabled = true; });
       const ssid = btn.dataset.connectSsid;
       const bssid = btn.dataset.connectBssid;
       const band = btn.dataset.connectBand;
-      document.getElementById("msg").textContent = `Connecting & verifying VPN on ${ssid}...`;
+      setHunterMsg(`Connecting & verifying VPN on ${ssid} (15-30s)...`, false);
       try {
         const d = await postAction({ action: "hunt-connect", ssid, bssid, band });
-        document.getElementById("msg").textContent = d.captive_required
-          ? `Connected to ${ssid} - captive portal detected. Tap Captive Login (10m).`
-          : `Connected to ${ssid} (${d.result || "ok"})`;
+        setHunterMsg(d.captive_required
+          ? `Connected to ${ssid} - captive portal detected. Tap Captive Login (10m) at top.`
+          : `Connected to ${ssid} (${d.result || "ok"})`, false);
       } catch (e) {
-        document.getElementById("msg").textContent = "Connect failed: " + e.message;
+        setHunterMsg("Connect failed: " + e.message, true);
       } finally {
         actionInFlight = false;
-        btn.disabled = false;
+        btn.textContent = origText;
+        document.querySelectorAll("#scan-list button[data-connect-ssid], #scan-btn").forEach((b) => { b.disabled = false; });
         setTimeout(load, 1000);
       }
     });
