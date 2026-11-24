@@ -75,11 +75,12 @@
     <div class="card">
       <div class="row">
         <strong>Autonomous Wi-Fi Hunter</strong>
-        <div style="display:flex;gap:8px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button class="sm" id="auto-hunt-btn">Auto-Hunt: -</button>
-          <button class="sm" id="scan-btn">Scan Nearby Wi-Fi</button>
+          <button class="sm" id="scan-btn">Scan Only</button>
         </div>
       </div>
+      <button id="best-btn" style="width:100%;margin-top:10px;background:#1d4ed8;border-color:#2563eb;color:#fff;font-weight:700;">Find Best Wi-Fi (Auto-Benchmark 30-60s)</button>
       <div class="sub" id="hunter-sub" style="margin-top:6px;">Idle</div>
       <div id="hunter-msg" class="sub" style="margin-top:6px;min-height:1.1em;color:var(--a);"></div>
       <div class="list" id="scan-list"></div>
@@ -239,9 +240,14 @@
         const busy = Boolean(h.hunting);
         document.getElementById("hunter-sub").textContent = busy ? "Hunting nearby Wi-Fi (please wait)..." : ("Last: " + (h.last_action || "idle"));
         const scanBtn = document.getElementById("scan-btn");
+        const bestBtn = document.getElementById("best-btn");
         if (scanBtn && !actionInFlight) {
           scanBtn.disabled = busy;
-          scanBtn.textContent = busy ? "Scanning..." : "Scan Nearby Wi-Fi";
+          scanBtn.textContent = busy ? "Scanning..." : "Scan Only";
+        }
+        if (bestBtn && !actionInFlight) {
+          bestBtn.disabled = busy;
+          bestBtn.textContent = busy ? "Benchmarking..." : "Find Best Wi-Fi (Auto-Benchmark 30-60s)";
         }
         if (!manualScanActive && Array.isArray(h.last_candidates) && h.last_candidates.length > 0) {
           renderCandidates(h.last_candidates);
@@ -285,12 +291,40 @@
       } catch (e) { document.getElementById("msg").textContent = "Config error: " + e.message; }
     });
 
+    document.getElementById("best-btn").addEventListener("click", async (ev) => {
+      const btn = ev.currentTarget;
+      if (actionInFlight) return;
+      actionInFlight = true;
+      btn.textContent = "Finding & Benchmarking Best Wi-Fi (30-60s)...";
+      document.querySelectorAll("#scan-list button[data-connect-ssid], #scan-btn, #best-btn").forEach((b) => { b.disabled = true; });
+      setHunterMsg("Scanning 2.4 & 5 GHz and benchmarking top APs (speed + latency + VPN)...", false);
+      try {
+        const d = await postAction({ action: "hunt-best" });
+        if (d.connected && d.ssid) {
+          const bandLbl = d.band === "5g" ? "5 GHz" : "2.4 GHz";
+          setHunterMsg(`Locked onto ${d.ssid} (${bandLbl}) - ${d.mbps ?? "?"} Mbps, ${d.rtt_ms ?? "?"} ms, ${d.loss_pct ?? 0}% loss (tested ${d.tried ?? 1} APs).`, false);
+        } else if (d.captive_required && d.ssid) {
+          setHunterMsg(`Best option ${d.ssid} needs Captive Login - tap Captive Login (10m) at top.`, false);
+        } else {
+          setHunterMsg(`No working Wi-Fi found after testing ${d.tried ?? 0} AP(s).`, true);
+        }
+      } catch (e) {
+        setHunterMsg("Best Wi-Fi search error: " + e.message, true);
+      } finally {
+        actionInFlight = false;
+        btn.textContent = "Find Best Wi-Fi (Auto-Benchmark 30-60s)";
+        document.querySelectorAll("#scan-list button[data-connect-ssid], #scan-btn, #best-btn").forEach((b) => { b.disabled = false; });
+        manualScanActive = false;
+        setTimeout(load, 800);
+      }
+    });
+
     document.getElementById("scan-btn").addEventListener("click", async (ev) => {
       const btn = ev.currentTarget;
       btn.disabled = true;
       btn.textContent = "Scanning...";
       actionInFlight = true;
-      document.querySelectorAll("#scan-list button[data-connect-ssid]").forEach((b) => { b.disabled = true; });
+      document.querySelectorAll("#scan-list button[data-connect-ssid], #best-btn").forEach((b) => { b.disabled = true; });
       setHunterMsg("Scanning 2.4 & 5 GHz via Groove CPE (10-15s)...", false);
       try {
         const d = await postAction({ action: "hunt-scan" });
@@ -302,8 +336,8 @@
       } finally {
         actionInFlight = false;
         btn.disabled = false;
-        btn.textContent = "Scan Nearby Wi-Fi";
-        document.querySelectorAll("#scan-list button[data-connect-ssid]").forEach((b) => { b.disabled = false; });
+        btn.textContent = "Scan Only";
+        document.querySelectorAll("#scan-list button[data-connect-ssid], #best-btn").forEach((b) => { b.disabled = false; });
         setTimeout(load, 800);
       }
     });

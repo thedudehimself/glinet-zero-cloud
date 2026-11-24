@@ -346,6 +346,23 @@
       document.getElementById("wifi-modal").classList.remove("open");
     }
 
+    async function runHuntBest(id, name) {
+      showToast(`Finding & benchmarking best 2.4/5 GHz Wi-Fi on ${name} (30-60s)...`);
+      try {
+        const res = await apiPost(`/api/devices/${id}/hunt-best`, {});
+        if (res.connected && res.ssid) {
+          showToast(`Locked ${res.ssid} (${res.mbps ?? "?"} Mbps, ${res.rtt_ms ?? "?"} ms, ${res.loss_pct ?? 0}% loss)`);
+        } else if (res.captive_required && res.ssid) {
+          showToast(`Captive portal on ${res.ssid} - tap Captive (10m)`);
+        } else {
+          showToast(`No working Wi-Fi found (tested ${res.tried ?? 0} APs)`);
+        }
+        await refreshAll(false);
+      } catch (err) {
+        showToast(`Find Best Wi-Fi failed: ${err.message}`);
+      }
+    }
+
     async function runHuntScan(id, name) {
       wifiModalDevId = id;
       wifiModalDevName = name;
@@ -618,6 +635,7 @@
                 </div>
                 <div class="mode-grid">${modeBtns}</div>
                 <div class="mode-grid">
+                  <button class="btn btn-primary" style="grid-column:1 / -1;min-height:36px;padding:6px 8px;font-size:0.78rem;" data-action="hunt-best" data-dev-id="${esc(dev.id)}" data-dev-name="${esc(dev.name)}" ${dev.hunt_running ? "disabled" : ""}>${dev.hunt_running ? "Benchmarking Wi-Fi..." : "Find Best Wi-Fi (30-60s)"}</button>
                   <button class="btn" style="min-height:36px;padding:6px 8px;font-size:0.78rem;" data-action="hunt-scan" data-dev-id="${esc(dev.id)}" data-dev-name="${esc(dev.name)}" ${dev.hunt_running ? "disabled" : ""}>${dev.hunt_running ? "Scanning..." : "Scan Nearby Wi-Fi"}</button>
                   <button class="btn" style="min-height:36px;padding:6px 8px;font-size:0.78rem;" data-action="open-networks" data-dev-id="${esc(dev.id)}" data-dev-name="${esc(dev.name)}">Known Wi-Fi</button>
                 </div>
@@ -696,6 +714,7 @@
       else if (action === "disable-cloud") disableCloud(id, name);
       else if (action === "reboot") rebootDevice(id, name);
       else if (action === "wan-mode") setWanMode(id, name, btn.dataset.mode);
+      else if (action === "hunt-best") runHuntBest(id, name);
       else if (action === "hunt-scan") runHuntScan(id, name);
       else if (action === "open-networks") openNetworksModal(id, name);
     });

@@ -286,6 +286,54 @@ associate_and_verify() {
     return 3
 }
 
+# Quick 4-second stability + throughput probe over the verified link:
+# For trusted_ok, probes via eth0 source IP; for vpn_ok, probes strictly via wg_van (zero cleartext leak).
+# Outputs: "<loss_pct> <rtt_ms> <mbps>"
+benchmark_active_link() {
+    _res="$1"
+    if [ "$_res" = "vpn_ok" ]; then
+        _src="$WG_VAN_IFACE"
+        _ping_dst="$WG_PEER_IP"
+    else
+        _src="$(get_iface_ip "$CPE_IFACE")"
+        _ping_dst="1.1.1.1"
+    fi
+    if [ -z "$_src" ]; then
+        printf '100 9999 0.0\n'
+        return 0
+    fi
+    _pout="$(ping -I "$_src" -c 4 -W 1 "$_ping_dst" 2>/dev/null || true)"
+    _pstats="$(printf '%s\n' "$_pout" | parse_ping_stats)"
+    _loss="${_pstats%% *}"
+    _rtt="${_pstats#* }"
+    _cf_ip="$(resolve_doh_ipv4 "speed.cloudflare.com" "$_src" 2>/dev/null || true)"
+    if [ -n "$_cf_ip" ]; then
+        _bps="$(curl -4 --interface "$_src" --connect-timeout 2 --max-time 4 -sS \
+            --resolve "speed.cloudflare.com:443:${_cf_ip}" \
+            -o /dev/null -w '%{speed_download}' \
+            "https://speed.cloudflare.com/__down?bytes=1500000" 2>/dev/null || echo 0)"
+    else
+        _bps="$(curl -4 --interface "$_src" --connect-timeout 2 --max-time 4 -sS \
+            -o /dev/null -w '%{speed_download}' \
+            "https://speed.cloudflare.com/__down?bytes=1500000" 2>/dev/null || echo 0)"
+    fi
+    _mbps="$(awk -v b="${_bps:-0}" 'BEGIN { b += 0; if (b < 0) b = 0; printf "%.1f", (b * 8) / 1000000 }')"
+    printf '%d %d %s\n' "$_loss" "$_rtt" "$_mbps"
+}
+
+score_benchmark() {
+    _tier="$1"
+    _loss="$2"
+    _rtt="$3"
+    _mbps="$4"
+    _rssi="$5"
+    awk -v t="$_tier" -v l="$_loss" -v r="$_rtt" -v m="$_mbps" -v s="$_rssi" 'BEGIN {
+        bonus = (t == 1) ? 1000 : ((t == 2) ? 500 : 0);
+        sc = bonus + (m * 10) - (l * 8) - (r / 4) + ((s + 100) / 5);
+        printf "%d", sc;
+    }'
+}
+
 cmd="${1:-scan}"
 
 if ! acquire_lock; then
@@ -397,8 +445,127 @@ EOF
                 "$tried" "$(json_escape "$captive_ssid")"
         fi
         ;;
+    best)
+        # 1-button quality & speed shootout (~30-60s): dual-band scan + benchmark top 3 diverse APs,
+        # then lock onto the highest-scoring stable/fast winner. Survives transient SSH HUP during AP switches.
+        trap '' HUP
+        now="$(date +%s)"
+        budget_sec="${VAN_HUNTER_BEST_BUDGET_SEC:-50}"
+        deadline=$((now + budget_sec))
+        cd_sec="$(lua "$NET_LUA" get-config "$KNOWN_FILE" cooldown_sec 7200 2>/dev/null || echo 7200)"
+        update_hunter_state "{\"hunting\":true,\"last_action\":\"best_scanning\"}"
+
+        raw="$(scan_groove_raw)"
+        # Manual 1-button request re-evaluates cooled APs too (van may have moved or firewall changed)
+        ranked="$(printf '%s\n' "$raw" | lua "$NET_LUA" rank-scan "$KNOWN_FILE" "$HUNTER_STATE" "$now" --include-cooled 2>/dev/null || echo '[]')"
+        [ -z "$ranked" ] && ranked='[]'
+        update_hunter_state "{\"hunting\":true,\"last_scan_at\":${now},\"last_action\":\"best_benchmarking\",\"last_candidates\":${ranked}}"
+
+        tsv="$(printf '%s\n' "$ranked" | lua "$NET_LUA" best-candidates-tsv 3 2>/dev/null || true)"
+        _tab="$(printf '\t')"
+
+        tried=0
+        best_score="-999999"
+        best_ssid=""
+        best_bssid=""
+        best_band=""
+        best_res=""
+        best_mbps="0.0"
+        best_rtt="9999"
+        best_loss="100"
+        best_tier="99"
+        last_bssid=""
+        captive_ssid=""
+        captive_bssid=""
+        captive_band=""
+        tested_json=""
+
+        while IFS="$_tab" read -r cand_bssid cand_tier cand_band cand_rssi cand_ssid; do
+            [ -z "$cand_ssid" ] && continue
+            # If a Tier 1 trusted AP already passed cleanly (loss <= 10%), never downgrade to untrusted Tiers 2-4
+            if [ "$best_tier" = "1" ] && [ "$cand_tier" -gt 1 ]; then
+                break
+            fi
+            if [ "$tried" -ge 1 ] && [ "$(date +%s)" -ge "$deadline" ]; then
+                break
+            fi
+            tried=$((tried + 1))
+            update_hunter_state "{\"hunting\":true,\"last_action\":\"testing:${tried}:$(json_escape "$cand_ssid")\"}"
+            res_code=0
+            reason="$(associate_and_verify "$cand_ssid" "$cand_bssid" "$cand_band")" || res_code=$?
+            last_bssid="$cand_bssid"
+
+            if [ "$res_code" -eq 0 ]; then
+                bstats="$(benchmark_active_link "$reason")"
+                _bloss="${bstats%% *}"
+                _brest="${bstats#* }"
+                _brtt="${_brest%% *}"
+                _bmbps="${_brest#* }"
+                _bscore="$(score_benchmark "$cand_tier" "$_bloss" "$_brtt" "$_bmbps" "$cand_rssi")"
+                entry="$(printf '{"ssid":"%s","bssid":"%s","band":"%s","tier":%d,"rssi_dbm":%d,"result":"%s","mbps":%s,"rtt_ms":%d,"loss_pct":%d,"score":%d}' \
+                    "$(json_escape "$cand_ssid")" "$(json_escape "$cand_bssid")" "$(json_escape "$cand_band")" \
+                    "$cand_tier" "$cand_rssi" "$reason" "$_bmbps" "$_brtt" "$_bloss" "$_bscore")"
+                tested_json="${tested_json:+${tested_json},}${entry}"
+                if [ "$_bscore" -gt "$best_score" ]; then
+                    best_score="$_bscore"
+                    best_ssid="$cand_ssid"
+                    best_bssid="$cand_bssid"
+                    best_band="$cand_band"
+                    best_res="$reason"
+                    best_mbps="$_bmbps"
+                    best_rtt="$_brtt"
+                    best_loss="$_bloss"
+                    best_tier="$cand_tier"
+                fi
+            elif [ "$res_code" -eq 2 ]; then
+                if [ -z "$captive_ssid" ]; then
+                    captive_ssid="$cand_ssid"
+                    captive_bssid="$cand_bssid"
+                    captive_band="$cand_band"
+                fi
+                entry="$(printf '{"ssid":"%s","bssid":"%s","band":"%s","tier":%d,"rssi_dbm":%d,"result":"captive_portal"}' \
+                    "$(json_escape "$cand_ssid")" "$(json_escape "$cand_bssid")" "$(json_escape "$cand_band")" \
+                    "$cand_tier" "$cand_rssi")"
+                tested_json="${tested_json:+${tested_json},}${entry}"
+            else
+                lua "$NET_LUA" cooldown "$HUNTER_STATE" "$cand_bssid" "$reason" "$((now + cd_sec))" >/dev/null 2>&1 || true
+                entry="$(printf '{"ssid":"%s","bssid":"%s","band":"%s","tier":%d,"rssi_dbm":%d,"result":"%s"}' \
+                    "$(json_escape "$cand_ssid")" "$(json_escape "$cand_bssid")" "$(json_escape "$cand_band")" \
+                    "$cand_tier" "$cand_rssi" "$reason")"
+                tested_json="${tested_json:+${tested_json},}${entry}"
+            fi
+        done <<EOF
+$tsv
+EOF
+
+        if [ -n "$best_ssid" ]; then
+            if [ "$last_bssid" != "$best_bssid" ]; then
+                update_hunter_state "{\"hunting\":true,\"last_action\":\"locking:$(json_escape "$best_ssid")\"}"
+                associate_and_verify "$best_ssid" "$best_bssid" "$best_band" >/dev/null 2>&1 || true
+            fi
+            vpn_ver="false"
+            [ "$best_res" = "vpn_ok" ] && vpn_ver="true"
+            summary="best:${best_ssid} (${best_mbps} Mbps, ${best_rtt}ms)"
+            update_hunter_state "{\"hunting\":false,\"last_action\":\"$(json_escape "$summary")\"}"
+            signal_daemon
+            printf '{"ok":true,"connected":true,"ssid":"%s","bssid":"%s","band":"%s","result":"%s","vpn_verified":%s,"mbps":%s,"rtt_ms":%d,"loss_pct":%d,"score":%d,"tried":%d,"tested":[%s]}\n' \
+                "$(json_escape "$best_ssid")" "$(json_escape "$best_bssid")" "$(json_escape "$best_band")" \
+                "$best_res" "$vpn_ver" "$best_mbps" "$best_rtt" "$best_loss" "$best_score" "$tried" "$tested_json"
+        elif [ -n "$captive_ssid" ]; then
+            if [ "$last_bssid" != "$captive_bssid" ]; then
+                associate_and_verify "$captive_ssid" "$captive_bssid" "$captive_band" >/dev/null 2>&1 || true
+            fi
+            update_hunter_state "{\"hunting\":false,\"last_action\":\"captive_available\",\"captive_available\":\"$(json_escape "$captive_ssid")\"}"
+            signal_daemon
+            printf '{"ok":true,"connected":false,"ssid":"%s","bssid":"%s","band":"%s","result":"captive_portal","vpn_verified":false,"captive_required":true,"tried":%d,"tested":[%s]}\n' \
+                "$(json_escape "$captive_ssid")" "$(json_escape "$captive_bssid")" "$(json_escape "$captive_band")" "$tried" "$tested_json"
+        else
+            update_hunter_state "{\"hunting\":false,\"last_action\":\"no_vpn_capable_ap\"}"
+            printf '{"ok":true,"connected":false,"tried":%d,"tested":[%s]}\n' "$tried" "$tested_json"
+        fi
+        ;;
     *)
-        printf '{"ok":false,"error":"usage: wifi-hunter.sh {scan|connect <ssid> [bssid]|auto}"}\n' >&2
+        printf '{"ok":false,"error":"usage: wifi-hunter.sh {scan|connect <ssid> [bssid] [band]|auto|best}"}\n' >&2
         exit 2
         ;;
 esac

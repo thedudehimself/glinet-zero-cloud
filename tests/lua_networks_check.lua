@@ -185,6 +185,24 @@ local ok_lb2, lb2 = run_cmd("lua " .. script .. " lookup-band " .. state .. ' "H
 assert_eq(ok_lb2, true, "lookup-band 2g failed")
 assert_eq(lb2:gsub("%s+", ""), "2g", "expected 2g band for HomeWiFi")
 
+-- Verify 5 GHz +10 dB rf_score preference and best-candidates-tsv (max 2 per SSID)
+local band_scan = table.concat({
+    "AA:11:11:11:11:01,'Free Cafe WiFi',2437/20/gn(24dBm),-62,802.11,,",
+    "AA:11:11:11:11:02,'Free Cafe WiFi',5220/20/ac(24dBm),-68,802.11,,",
+    "AA:11:11:11:11:03,'Free Cafe WiFi',2462/20/gn(24dBm),-64,802.11,,",
+    "AA:11:11:11:11:04,'Other Open',5180/20/ac(24dBm),-70,802.11,,",
+}, "\n")
+local ok_br, out_br = run_cmd("lua " .. script .. " rank-scan " .. known .. " " .. state .. " " .. tostring(now), band_scan)
+assert_eq(ok_br, true, "band rank-scan failed: " .. out_br)
+local br = assert(jsonc.parse(out_br))
+assert_eq(br[1].bssid, "AA:11:11:11:11:02", "5 GHz -68 dBm (rf_score -58) must beat 2.4 GHz -62 dBm")
+assert_eq(br[1].rf_score, -58, "expected 5g +10 dB rf_score")
+local ok_btsv, out_btsv = run_cmd("lua " .. script .. " best-candidates-tsv 3", out_br)
+assert_eq(ok_btsv, true, "best-candidates-tsv failed")
+assert(out_btsv:find("AA:11:11:11:11:02", 1, true) ~= nil, "best-candidates-tsv must include 5g top AP")
+assert(out_btsv:find("AA:11:11:11:11:04", 1, true) ~= nil, "best-candidates-tsv must include diverse 2nd SSID")
+assert(out_btsv:find("AA:11:11:11:11:03", 1, true) == nil, "best-candidates-tsv must cap at 2 BSSIDs per SSID")
+
 local ok_cmd2, cmd2 = run_cmd("lua " .. script .. " ros-connect-cmd " .. known .. ' "xfinitywifi"')
 assert_eq(ok_cmd2, true, "ros-connect-cmd open failed: " .. cmd2)
 assert(cmd2:find('security-profile="van-open"', 1, true) ~= nil, "must select van-open: " .. cmd2)

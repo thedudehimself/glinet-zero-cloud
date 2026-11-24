@@ -33,6 +33,7 @@ from ssh_ops import (
     reboot_kvm,
     reset_van_usage,
     run_triage_sweep,
+    run_van_hunt_best,
     run_van_hunt_connect,
     run_van_hunt_scan,
     set_van_hunt_config,
@@ -94,6 +95,7 @@ class PortalApp:
         reboot_fn: Callable | None = None,
         wan_mode_fn: Callable | None = None,
         hunt_scan_fn: Callable | None = None,
+        hunt_best_fn: Callable | None = None,
         hunt_connect_fn: Callable | None = None,
         hunt_config_fn: Callable | None = None,
         list_networks_fn: Callable | None = None,
@@ -125,6 +127,7 @@ class PortalApp:
         self._reboot_fn = reboot_fn or reboot_kvm
         self._wan_mode_fn = wan_mode_fn or set_van_wan_mode
         self._hunt_scan_fn = hunt_scan_fn or run_van_hunt_scan
+        self._hunt_best_fn = hunt_best_fn or run_van_hunt_best
         self._hunt_connect_fn = hunt_connect_fn or run_van_hunt_connect
         self._hunt_config_fn = hunt_config_fn or set_van_hunt_config
         self._list_networks_fn = list_networks_fn or list_van_networks
@@ -418,6 +421,32 @@ class PortalApp:
         finally:
             lock.release()
 
+    def trigger_hunt_best(self, device_id: str) -> tuple[int, dict]:
+        dev, code, err = self._require_van_router(device_id)
+        if not dev:
+            return code, err or {"error": "invalid device"}
+        lock = self._hunt_locks[device_id]
+        if not lock.acquire(blocking=False):
+            return 409, {"error": f"Wi-Fi hunt/scan already in progress for {device_id}"}
+        try:
+            ip = self._device_ip(device_id, dev)
+            res = self._hunt_best_fn(ip, dev.get("ssh_user", "root"), self.ssh_key)
+            if res.get("ok"):
+                if self.enable_system_io:
+                    def _delayed_refresh() -> None:
+                        time.sleep(3)
+                        try:
+                            self.refresh_ssh(device_id)
+                        except Exception:
+                            pass
+                    threading.Thread(target=_delayed_refresh, daemon=True).start()
+                return 200, res
+            if res.get("exit_code") == 3 or res.get("error") == "busy":
+                return 409, {"error": "Router Wi-Fi hunter is busy", "ok": False}
+            return 502, {"ok": False, "error": res.get("error") or "Best Wi-Fi search failed"}
+        finally:
+            lock.release()
+
     def trigger_hunt_connect(self, device_id: str, ssid: str, bssid: str = "") -> tuple[int, dict]:
         dev, code, err = self._require_van_router(device_id)
         if not dev:
@@ -542,6 +571,8 @@ class PortalApp:
                 return self.trigger_van_reset_usage(device_id)
             if action == "hunt-scan":
                 return self.trigger_hunt_scan(device_id)
+            if action == "hunt-best":
+                return self.trigger_hunt_best(device_id)
             if action == "hunt-connect":
                 ssid = body_json.get("ssid")
                 bssid = body_json.get("bssid", "")
@@ -636,7 +667,7 @@ def create_server(app: PortalApp, host: str = "127.0.0.1", port: int = 8450) -> 
 
         def setup(self) -> None:
             super().setup()
-            self.connection.settimeout(30)
+            self.connection.settimeout(120)
 
         def log_message(self, fmt: str, *args) -> None:
             LOG.info("%s - %s", self.address_string(), fmt % args)
@@ -806,6 +837,10 @@ def create_server(app: PortalApp, host: str = "127.0.0.1", port: int = 8450) -> 
                     return
                 if action == "hunt-scan":
                     code, data = app.trigger_hunt_scan(dev_id)
+                    self._send_json(code, data)
+                    return
+                if action == "hunt-best":
+                    code, data = app.trigger_hunt_best(dev_id)
                     self._send_json(code, data)
                     return
                 if action in ("hunt-connect", "hunt-config", "networks"):

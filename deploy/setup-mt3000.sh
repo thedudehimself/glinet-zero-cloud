@@ -257,6 +257,9 @@ uci -q commit kmwan || true
 /etc/init.d/kmwan stop 2>/dev/null || true
 /etc/init.d/kmwan disable 2>/dev/null || true
 
+uci -q set uhttpd.main.script_timeout='120' || true
+uci -q set uhttpd.main.network_timeout='120' || true
+uci -q commit uhttpd || true
 uci commit network
 uci commit firewall
 /etc/init.d/uhttpd enable 2>/dev/null || true

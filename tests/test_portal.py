@@ -689,6 +689,46 @@ def test_van_status_returns_cached_snapshot_during_hunt_scan(tmp_path):
         app._hunt_locks["mt3000"].release()
 
 
+def test_trigger_hunt_best_returns_benchmark_winner(tmp_path):
+    cfg = {
+        "tailscale_host": "gateway.tailnet-example.ts.net",
+        "portal_port": 8440,
+        "allowed_tailscale_users": ["alice@example.com"],
+        "devices": [
+            {
+                "id": "mt3000",
+                "name": "GL-MT3000",
+                "role": "van_router",
+                "model": "GL-MT3000",
+                "mac": "94:83:c4:00:00:03",
+                "preferred_vlan": "br10",
+                "fallback_ip": "192.168.2.5",
+                "ssh_enabled": True,
+            }
+        ],
+    }
+    app = PortalApp(
+        cfg,
+        StateStore(tmp_path / "s.db"),
+        enable_system_io=False,
+        hunt_best_fn=lambda *a: {
+            "ok": True,
+            "connected": True,
+            "ssid": "Camp5G",
+            "band": "5g",
+            "mbps": 42.5,
+            "rtt_ms": 21,
+            "loss_pct": 0,
+            "tried": 2,
+        },
+    )
+    code, data = app.handle_van_cgi_post("mt3000", {"action": "hunt-best"})
+    assert code == 200
+    assert data["ssid"] == "Camp5G"
+    assert data["mbps"] == 42.5
+
+
+
 
 
 

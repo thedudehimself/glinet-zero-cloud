@@ -78,6 +78,9 @@ case "$cmd" in
     hunt-scan)
         exec "$HUNTER_SH" scan
         ;;
+    hunt-best)
+        exec "$HUNTER_SH" best
+        ;;
     hunt-connect)
         if [ "${2:-}" = "--stdin" ]; then
             _body="$(cat)"

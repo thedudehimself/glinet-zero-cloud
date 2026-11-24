@@ -607,10 +607,12 @@ elseif cmd == "rank-scan" then
             end
 
             if tier then
+                local rf_score = row.rssi_dbm + ((row.band == "5g" and row.rssi_dbm >= -74) and 10 or 0)
                 table.insert(ranked, {
                     ssid = row.ssid,
                     bssid = row.bssid,
                     rssi_dbm = row.rssi_dbm,
+                    rf_score = rf_score,
                     security = row.security,
                     freq_mhz = row.freq_mhz,
                     band = row.band,
@@ -629,6 +631,7 @@ elseif cmd == "rank-scan" then
     table.sort(ranked, function(a, b)
         if a.tier ~= b.tier then return a.tier < b.tier end
         if a.priority ~= b.priority then return a.priority < b.priority end
+        if a.rf_score ~= b.rf_score then return a.rf_score > b.rf_score end
         if a.rssi_dbm ~= b.rssi_dbm then return a.rssi_dbm > b.rssi_dbm end
         return a.ssid < b.ssid
     end)
@@ -766,6 +769,34 @@ elseif cmd == "candidates-tsv" then
     for _, c in ipairs(arr) do
         if type(c) == "table" and type(c.ssid) == "string" and type(c.bssid) == "string" then
             io.stdout:write(string.format("%s\t%s\t%s\n", c.bssid, c.trusted and "1" or "0", c.ssid))
+        end
+    end
+    os.exit(0)
+
+elseif cmd == "best-candidates-tsv" then
+    -- Pick up to max_n (default 3) diverse top candidates (at most 2 BSSIDs per SSID)
+    -- Format: bssid \t tier \t band \t rssi_dbm \t ssid
+    local max_n = tonumber(arg[2]) or 3
+    local arr = jsonc.parse(io.stdin:read("*a") or "")
+    if type(arr) ~= "table" then os.exit(0) end
+    local per_ssid = {}
+    local emitted = 0
+    for _, c in ipairs(arr) do
+        if emitted >= max_n then break end
+        if type(c) == "table" and type(c.ssid) == "string" and type(c.bssid) == "string" then
+            local cnt = per_ssid[c.ssid] or 0
+            if cnt < 2 then
+                per_ssid[c.ssid] = cnt + 1
+                emitted = emitted + 1
+                io.stdout:write(string.format(
+                    "%s\t%d\t%s\t%d\t%s\n",
+                    c.bssid,
+                    tonumber(c.tier) or 4,
+                    type(c.band) == "string" and c.band or "",
+                    tonumber(c.rssi_dbm) or -99,
+                    c.ssid
+                ))
+            end
         end
     end
     os.exit(0)

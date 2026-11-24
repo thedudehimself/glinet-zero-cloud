@@ -103,6 +103,13 @@ if [ -n "$action" ]; then
             [ "$rc" -ne 0 ] && respond 502 "Bad Gateway" "$out"
             respond 200 "OK" "$out"
             ;;
+        hunt-best)
+            rc=0
+            out="$("$CLI" hunt-best 2>&1)" || rc=$?
+            [ "$rc" -eq 3 ] && respond 409 "Conflict" "$out"
+            [ "$rc" -ne 0 ] && respond 502 "Bad Gateway" "$out"
+            respond 200 "OK" "$out"
+            ;;
         hunt-connect)
             rc=0
             out="$("$CLI" hunt-connect --stdin < "$tmp_body" 2>&1)" || rc=$?

@@ -418,6 +418,10 @@ def run_van_hunt_scan(ip: str, user: str, key_path: Path, runner=subprocess.run,
     return _run_van_json_cmd(ip, user, key_path, "/usr/bin/van-wan hunt-scan", runner=runner, timeout=timeout)
 
 
+def run_van_hunt_best(ip: str, user: str, key_path: Path, runner=subprocess.run, timeout: int = 110) -> dict:
+    return _run_van_json_cmd(ip, user, key_path, "/usr/bin/van-wan hunt-best", runner=runner, timeout=timeout)
+
+
 def run_van_hunt_connect(
     ip: str,
     user: str,
