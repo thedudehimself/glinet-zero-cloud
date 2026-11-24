@@ -177,6 +177,8 @@ apply_vpn_gate() {
             ;;
         captive_temp)
             # Explicit user-triggered 10m splash login: permit ONLY HTTP/HTTPS/DNS out eth0
+            # and steer LAN/guest explicitly to table 101 (beats GL.iNet stock 9920 blackhole rules
+            # and keeps captive login strictly on CPE eth0, never Starlink).
             _set_gate_chain_reject
             iptables -w -I VAN_CPE_GATE 1 -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
             iptables -w -I VAN_CPE_GATE 2 -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
@@ -185,12 +187,22 @@ apply_vpn_gate() {
             _set_dns_chain_reject
             iptables -w -I VAN_CPE_DNS_OUT 1 -p udp --dport 53 -j ACCEPT 2>/dev/null || true
             iptables -w -I VAN_CPE_DNS_OUT 2 -p tcp --dport 53 -j ACCEPT 2>/dev/null || true
+            for _cidr in $(_list_local_lan_cidrs); do
+                ip rule add to "$_cidr" table main prio 94 2>/dev/null || true
+            done
+            ip rule add iif br-lan table 101 prio 95 2>/dev/null || true
+            ip rule add iif br-guest table 101 prio 96 2>/dev/null || true
             ;;
         trusted_direct)
             iptables -w -F VAN_CPE_GATE 2>/dev/null || true
             iptables -w -A VAN_CPE_GATE -j ACCEPT 2>/dev/null || true
             iptables -w -F VAN_CPE_DNS_OUT 2>/dev/null || true
             iptables -w -A VAN_CPE_DNS_OUT -j ACCEPT 2>/dev/null || true
+            for _cidr in $(_list_local_lan_cidrs); do
+                ip rule add to "$_cidr" table main prio 94 2>/dev/null || true
+            done
+            ip rule add iif br-lan table main prio 95 2>/dev/null || true
+            ip rule add iif br-guest table main prio 96 2>/dev/null || true
             ;;
         *)
             # locked (default fail-closed, zero empty-chain window)

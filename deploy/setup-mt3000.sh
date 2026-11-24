@@ -252,6 +252,8 @@ sysctl -p /etc/sysctl.d/99-van-no-ipv6.conf >/dev/null 2>&1 || true
 
 uci -q set gl-cloud.@cloud[0].enable='0' || true
 uci -q commit gl-cloud || true
+uci -q set kmwan.wan.check='0' || true
+uci -q commit kmwan || true
 /etc/init.d/kmwan stop 2>/dev/null || true
 /etc/init.d/kmwan disable 2>/dev/null || true
 
@@ -339,6 +341,7 @@ else:
         "uci set network.wg_van.proto='wireguard'",
         f"uci set network.wg_van.private_key={q(priv)}",
         "uci set network.wg_van.fwmark='0x101'",
+        "uci set network.wg_van.mtu='1280'",
         "uci -q del network.wg_van.addresses || true",
         f"uci add_list network.wg_van.addresses={q(addr)}",
         "uci set network.wg_van_peer=wireguard_wg_van",

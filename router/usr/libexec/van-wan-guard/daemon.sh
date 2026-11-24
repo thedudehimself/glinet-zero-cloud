@@ -366,6 +366,11 @@ run_tick() {
     ensure_policy_rule "$cpe_ip" "$CPE_TABLE"
     ensure_policy_rule "$sl_ip" "$SL_TABLE"
     ensure_mgmt_dest_rules
+    if [ "$DRY_RUN" != "1" ] && [ "$cpe_link" = "1" ]; then
+        if ip route show table "$CPE_TABLE" 2>/dev/null | grep -q "dead"; then
+            ip route replace default via "$cpe_gw" dev "$CPE_IFACE" src "$cpe_ip" table "$CPE_TABLE" 2>/dev/null || true
+        fi
+    fi
 
     # Probe CPE strictly via eth0 source IP (table 101) using configured ping_targets
     cpe_loss=100
