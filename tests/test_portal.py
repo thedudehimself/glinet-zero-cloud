@@ -648,28 +648,23 @@ def test_van_ui_and_cgi_bridge_routes_require_tailscale_auth_and_csrf(tmp_path: 
 
 
 def test_van_status_returns_cached_snapshot_during_hunt_scan(tmp_path):
-    cfg = tmp_path / "devices.json"
-    cfg.write_text(
-        json.dumps(
+    cfg = {
+        "tailscale_host": "gateway.tailnet-example.ts.net",
+        "portal_port": 8440,
+        "allowed_tailscale_users": ["alice@example.com"],
+        "devices": [
             {
-                "tailscale_host": "gateway.tailnet-example.ts.net",
-                "portal_port": 8440,
-                "allowed_tailscale_users": ["alice@example.com"],
-                "devices": [
-                    {
-                        "id": "mt3000",
-                        "name": "GL-MT3000",
-                        "role": "van_router",
-                        "model": "GL-MT3000",
-                        "mac": "94:83:c4:00:00:03",
-                        "preferred_vlan": "br10",
-                        "fallback_ip": "192.168.2.5",
-                        "ssh_enabled": True,
-                    }
-                ],
+                "id": "mt3000",
+                "name": "GL-MT3000",
+                "role": "van_router",
+                "model": "GL-MT3000",
+                "mac": "94:83:c4:00:00:03",
+                "preferred_vlan": "br10",
+                "fallback_ip": "192.168.2.5",
+                "ssh_enabled": True,
             }
-        )
-    )
+        ],
+    }
     calls = {"n": 0}
 
     def fake_status(*_args):
